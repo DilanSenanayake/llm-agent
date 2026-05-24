@@ -1,0 +1,20 @@
+# Core UI
+streamlit>=1.32.0
+python-dotenv>=1.0.0
+
+# sentence-transformers / FAISS stack (avoid NumPy 2.x breakage on Windows)
+numpy>=1.24.0,<2.0.0
+
+# Documents
+pypdf>=4.2.0
+python-docx>=1.1.0
+
+# AI / LangChain (vectorstores + documents) + Google Gen AI SDK (Gemini)
+langchain>=0.2.14
+langchain-core>=0.2.38
+langchain-community>=0.2.12
+google-genai>=1.0.0
+
+# Embeddings + vector search
+sentence-transformers>=2.7.0
+faiss-cpu>=1.8.0
