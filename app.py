@@ -114,7 +114,10 @@ def main() -> None:
     )
 
     st.title("Agentic Knowledge Workspace")
-    st.caption("Upload documents, index them locally, and generate summaries or reports with RAG + Gemini.")
+    st.caption(
+        "Upload documents, index them locally, and ask questions or generate "
+        "summaries, reports, slides, and comparisons with RAG + Gemini."
+    )
 
     with st.sidebar:
         st.subheader("Workspace")
@@ -166,17 +169,37 @@ def main() -> None:
     with col_q:
         st.subheader("2. Ask the workspace")
         instruction = st.text_area(
-            "Your instruction or topic",
+            "Your question or instruction",
             height=140,
-            placeholder='e.g. "Summarize the main compliance themes" or "Report on methodology sections"',
+            placeholder=(
+                'e.g. "What are the main risks?" or "Summarize compliance themes" '
+                'or "Compare methodology vs results sections"'
+            ),
         )
 
-        b1, b2, b3 = st.columns([1, 1, 1])
+        intent_options = {
+            "Auto-detect": None,
+            "Ask": "ask",
+            "Summary": "summary",
+            "Report": "report",
+            "Slides": "slides",
+            "Compare": "compare",
+        }
+        selected_label = st.selectbox(
+            "Output type (optional)",
+            options=list(intent_options.keys()),
+            index=0,
+            help=(
+                "Leave on Auto-detect to let the agent infer intent from your text "
+                "(defaults to Ask). Select a type to force that format."
+            ),
+        )
+        forced_intent = intent_options[selected_label]
+
+        b1, b2 = st.columns([1, 1])
         with b1:
-            do_summary = st.button("Generate Summary", use_container_width=True)
+            do_generate = st.button("Generate", type="primary", use_container_width=True)
         with b2:
-            do_report = st.button("Generate Report", use_container_width=True)
-        with b3:
             do_try_again = st.button(
                 "Try again (clear database)",
                 use_container_width=True,
@@ -191,13 +214,7 @@ def main() -> None:
             st.success("Vector database and uploads cleared. Upload and process new documents.")
             st.rerun()
 
-        forced = None
-        if do_summary:
-            forced = "summary"
-        elif do_report:
-            forced = "report"
-
-        if forced is not None:
+        if do_generate:
             store = _get_store()
             if store is None:
                 st.warning("Process at least one document before generating output.")
@@ -207,7 +224,7 @@ def main() -> None:
                         text, intent = run_agent(
                             store,
                             user_instruction=instruction,
-                            forced_intent=forced,
+                            forced_intent=forced_intent,
                         )
                     except ValueError as exc:
                         st.error(_friendly_error(exc))
@@ -219,6 +236,7 @@ def main() -> None:
                         st.session_state["last_output"] = text
                         st.session_state["last_intent"] = intent
                         with output_placeholder:
+                            st.caption(f"Detected intent: **{intent}**")
                             st.markdown(text)
                         st.download_button(
                             label="Download as TXT",
@@ -230,6 +248,7 @@ def main() -> None:
 
         elif st.session_state.get("last_output"):
             with output_placeholder:
+                st.caption(f"Intent: **{st.session_state.get('last_intent', 'unknown')}**")
                 st.markdown(st.session_state["last_output"])
             st.download_button(
                 label="Download last output as TXT",

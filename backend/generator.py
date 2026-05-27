@@ -6,7 +6,7 @@ from typing import Literal
 from google import genai
 from google.genai.types import GenerateContentConfig
 
-IntentType = Literal["summary", "report"]
+IntentType = Literal["ask", "summary", "report", "slides", "compare"]
 
 DEFAULT_MODEL = "gemini-3-flash-preview"
 MODEL_FALLBACKS = (
@@ -16,12 +16,10 @@ MODEL_FALLBACKS = (
 )
 
 
-# API key from GEMINI_API_KEY (or GOOGLE_API_KEY) per Google Gen AI SDK.
 def _get_client() -> genai.Client:
     key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if key:
         return genai.Client(api_key=key)
-    # Client() also reads GEMINI_API_KEY from the environment when api_key is omitted
     if not os.getenv("GEMINI_API_KEY"):
         raise ValueError(
             "Missing API key. Set GEMINI_API_KEY in your environment or .env file."
@@ -43,6 +41,12 @@ def _is_model_not_found(exc: BaseException) -> bool:
     return "not_found" in msg or "404" in msg
 
 
+ASK_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+Answer the user's question directly and concisely.
+If the context is insufficient, say what is missing instead of inventing facts.
+Use markdown where helpful (headings, lists, bold for emphasis)."""
+
+
 SUMMARY_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
 If the context is insufficient, say what is missing instead of inventing facts.
 Produce markdown with:
@@ -62,6 +66,33 @@ Produce markdown with exactly these sections:
 Maintain coherence and professional tone."""
 
 
+SLIDES_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+If the context is insufficient, say what is missing instead of inventing facts.
+Produce a slide deck outline in markdown. For each slide use:
+### Slide N: Title
+- Bullet points (3–5 per slide, concise)
+Include a title slide and a closing slide. Keep content presentation-ready."""
+
+
+COMPARE_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+If the context is insufficient, say what is missing instead of inventing facts.
+Produce markdown with:
+## Overview
+## Comparison Table (use markdown table when possible)
+## Key Similarities
+## Key Differences
+## Conclusion
+Be balanced and cite only what the context supports."""
+
+
+_SYSTEM_BY_INTENT: dict[IntentType, str] = {
+    "ask": ASK_SYSTEM,
+    "summary": SUMMARY_SYSTEM,
+    "report": REPORT_SYSTEM,
+    "slides": SLIDES_SYSTEM,
+    "compare": COMPARE_SYSTEM,
+}
+
 USER_TEMPLATE = """RETRIEVED CONTEXT:
 {context}
 
@@ -71,13 +102,12 @@ USER INSTRUCTION:
 Generate the requested output following the system rules. Use markdown."""
 
 
-# Call Gemini with system instruction + user content (RAG context).
 def generate_rag_output(
     intent: IntentType,
     context: str,
     instruction: str,
 ) -> str:
-    system = SUMMARY_SYSTEM if intent == "summary" else REPORT_SYSTEM
+    system = _SYSTEM_BY_INTENT[intent]
     user_content = USER_TEMPLATE.format(
         context=context.strip(),
         instruction=(instruction or "").strip() or "Follow the system format.",
