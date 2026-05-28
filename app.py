@@ -140,6 +140,10 @@ def main() -> None:
 
     with col_u:
         st.subheader("1. Document upload")
+        st.info(
+            "Starting a new set of documents? Click 'Try again (clear database)' first "
+            "to avoid mixing vectors from older uploads."
+        )
         uploaded = st.file_uploader(
             "PDF or DOCX",
             type=["pdf", "docx"],
