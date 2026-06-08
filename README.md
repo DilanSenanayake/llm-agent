@@ -1,41 +1,47 @@
 # Agentic Knowledge Workspace
 
-Local-first MVP for **document upload → semantic indexing → RAG-powered summaries and reports** using **Streamlit**, **LangChain**, **FAISS**, **sentence-transformers** (`all-MiniLM-L6-v2`), and the **Gemini API**.
+Local-first MVP for **document upload → semantic indexing → RAG-powered Q&A, summaries, reports, slides, and comparisons** using **Streamlit**, **LangChain** (documents + FAISS), **sentence-transformers** (`all-MiniLM-L6-v2`), and the **Google Gen AI SDK** (Gemini).
 
 ## Overview
 
-Users upload **PDF** or **DOCX** files. The app extracts and cleans text, splits it into **500-word chunks with 50-word overlap**, embeds chunks, and stores them in a **local FAISS** index under `vector_db/`. When you click **Generate Summary** or **Generate Report**, a lightweight **agent** classifies intent, **retrieves** relevant chunks, and **Gemini** produces **markdown** grounded in that context.
+Users upload **PDF** or **DOCX** files. The app extracts and cleans text, splits it into **500-word chunks with 50-word overlap**, embeds chunks, and stores them in a **local FAISS** index under `vector_db/`. When you click **Generate**, a lightweight **agent** classifies intent, **retrieves** relevant chunks, and **Gemini** produces **markdown** grounded in that context.
 
 ## Architecture
 
 ```text
 app.py (Streamlit)
     │
+    ├── backend/paths.py             # PROJECT_ROOT, uploads/, vector_db/ paths
     ├── backend/document_loader.py   # PyPDF + python-docx, text cleanup
     ├── backend/chunker.py           # Word-based chunks (500 / 50 overlap)
     ├── backend/embeddings.py        # sentence-transformers MiniLM → LangChain Embeddings
     ├── backend/vector_store.py      # FAISS build / merge / save / load
     ├── backend/retriever.py         # similarity search + context formatting
-    ├── backend/generator.py         # Gemini prompts (summary vs report)
+    ├── backend/generator.py         # Gemini prompts (per-intent, google.genai)
     └── backend/agent.py             # intent → retrieve → generate
 ```
 
 - **Uploads** land in `uploads/` (no auth, single workspace on your machine).
 - **Vector index** is persisted under `vector_db/faiss_index/` (local files only).
+- See `docs/ARCHITECTURE.txt` for a full system design reference.
 
 ## How RAG works here
 
 1. Documents are chunked and turned into embeddings with **all-MiniLM-L6-v2**.
 2. Embeddings are stored in **FAISS** for fast similarity search.
-3. Your instruction (and/or explicit Summary/Report button) drives a **query embedding**.
-4. The **top similar chunks** are concatenated into a bounded **context block**.
+3. Your instruction (and/or selected output type) drives a **query embedding**.
+4. The **top similar chunks** are concatenated into a bounded **context block** (max ~12k characters).
 5. **Gemini** is instructed to **only** use that context, reducing unsupported extrapolation.
 
 ## How the agent works
 
 Flow: **User instruction → intent → retrieval → generation → markdown output**.
 
-- **Intent**: keyword-style (`summary` vs `report`); the Streamlit buttons **force** the mode so you do not have to type “summary” or “report”.
+- **Intents**: `ask`, `summary`, `report`, `slides`, `compare`.
+- **Intent detection** (priority order):
+  1. **Output type** selectbox in the UI (forces a specific format).
+  2. **Keywords** in your text (e.g. “compare”, “slides”, “summarize”, “report”).
+  3. **Default** to `ask` when nothing else matches.
 - **No autonomous tool loops** — one retrieval pass and one LLM call per generation.
 
 ## Setup
@@ -67,10 +73,11 @@ python -m pip install -r requirements.txt
 
 ### 2. Environment variables
 
-Copy `.env.example` to `.env` and set your Gemini key:
+Create a `.env` file in the project root with your Gemini API key:
 
 ```powershell
-copy .env.example .env
+# .env
+GEMINI_API_KEY=your_key_here
 ```
 
 | Variable | Required | Description |
@@ -82,6 +89,8 @@ copy .env.example .env
 
 \*Provide at least one of `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
 
+For **Streamlit Cloud**, set the same values in `.streamlit/secrets.toml` instead of committing `.env`.
+
 ### 3. Run the app
 
 ```powershell
@@ -90,13 +99,21 @@ streamlit run app.py
 
 Open the URL Streamlit prints (usually `http://localhost:8501`).
 
+The first run may be slow while **all-MiniLM-L6-v2** downloads; later runs use the local cache.
+
 ## Expected user flow
 
 1. Upload one or more **PDF** / **DOCX** files.
-2. Click **Process uploaded documents** (embeddings + FAISS update).
-3. Enter an instruction (optional but improves retrieval focus).
-4. Click **Generate Summary** or **Generate Report**.
-5. Read the markdown result; optionally **download as TXT**.
+2. Click **Process uploaded documents** (extract, chunk, embed, merge into FAISS).
+3. Enter a **question or instruction** (optional but improves retrieval focus).
+4. Optionally choose an **output type** (Auto-detect, Ask, Summary, Report, Slides, or Compare).
+5. Click **Generate**.
+6. Read the markdown result; optionally **download as TXT**.
+
+**Sidebar / workspace controls:**
+
+- **Reload index from disk** — clears the in-memory FAISS cache so the next action reloads from `vector_db/`.
+- **Try again (clear database)** — deletes the FAISS index, uploaded files, and last output so you can start fresh.
 
 ## Screenshots
 
@@ -104,9 +121,7 @@ Add your own screenshots under `docs/screenshots/` and reference them here, for 
 
 ![Upload and process](docs/screenshots/upload-process.png)
 
-![Summary output](docs/screenshots/summary-output.png)
-
-![Report output](docs/screenshots/report-output.png)
+![Generated output](docs/screenshots/generated-output.png)
 
 *(Placeholder paths — create the folder and images when documenting the project.)*
 
