@@ -41,13 +41,20 @@ def _is_model_not_found(exc: BaseException) -> bool:
     return "not_found" in msg or "404" in msg
 
 
-ANSWER_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+_HISTORY_RULE = (
+    "Use CONVERSATION SO FAR to interpret follow-up questions, but ground all facts ONLY "
+    "in RETRIEVED CONTEXT — never invent details from chat history alone."
+)
+
+ANSWER_SYSTEM = f"""You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+{_HISTORY_RULE}
 Answer the user's question directly and concisely.
 If the context is insufficient, say what is missing instead of inventing facts.
 Use markdown where helpful (headings, lists, bold for emphasis)."""
 
 
-BRIEF_SUMMARY_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+BRIEF_SUMMARY_SYSTEM = f"""You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+{_HISTORY_RULE}
 If the context is insufficient, say what is missing instead of inventing facts.
 Produce a short overview of the topic named in the user instruction — not a full document review.
 Use markdown with:
@@ -56,14 +63,16 @@ Use markdown with:
 Keep the tone clear and professional."""
 
 
-EXTRACT_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+EXTRACT_SYSTEM = f"""You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+{_HISTORY_RULE}
 If the context is insufficient, say what is missing instead of inventing facts.
 Extract only the facts, items, or data the user asked for — no narrative essay.
 Prefer bullets, numbered lists, or markdown tables. Include dates, names, numbers, and
 requirements when present. Do not pad with commentary."""
 
 
-COMPARE_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+COMPARE_SYSTEM = f"""You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+{_HISTORY_RULE}
 If the context is insufficient, say what is missing instead of inventing facts.
 Compare only what the user named in their instruction.
 Produce markdown with:
@@ -82,22 +91,31 @@ _SYSTEM_BY_FORMAT: dict[ResponseFormat, str] = {
     "compare": COMPARE_SYSTEM,
 }
 
-USER_TEMPLATE = """RETRIEVED CONTEXT:
+USER_TEMPLATE = """{history_section}RETRIEVED CONTEXT:
 {context}
 
-USER INSTRUCTION:
+CURRENT USER MESSAGE:
 {instruction}
 
 Generate the requested output following the system rules. Use markdown."""
+
+
+def _history_section(chat_history: str) -> str:
+    history = chat_history.strip()
+    if not history:
+        return ""
+    return f"CONVERSATION SO FAR:\n{history}\n\n"
 
 
 def generate_rag_output(
     response_format: ResponseFormat,
     context: str,
     instruction: str,
+    chat_history: str = "",
 ) -> str:
     system = _SYSTEM_BY_FORMAT[response_format]
     user_content = USER_TEMPLATE.format(
+        history_section=_history_section(chat_history),
         context=context.strip(),
         instruction=instruction.strip(),
     )

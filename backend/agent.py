@@ -4,6 +4,7 @@ from typing import Literal
 
 from langchain_community.vectorstores import FAISS
 
+from backend.chat_history import format_chat_history
 from backend.generator import ResponseFormat, generate_rag_output
 from backend.retriever import DEFAULT_K, format_context, retrieve_context
 
@@ -51,6 +52,7 @@ def run_agent(
     store: FAISS,
     user_instruction: str,
     response_format: FormatChoice = "auto",
+    chat_messages: list[dict] | None = None,
     top_k: int = DEFAULT_K,
 ) -> tuple[str, ResponseFormat]:
     instruction = (user_instruction or "").strip()
@@ -63,5 +65,11 @@ def run_agent(
 
     docs = retrieve_context(store, instruction, k=top_k)
     context = format_context(docs)
-    output = generate_rag_output(fmt, context=context, instruction=instruction)
+    history = format_chat_history(chat_messages or [])
+    output = generate_rag_output(
+        fmt,
+        context=context,
+        instruction=instruction,
+        chat_history=history,
+    )
     return output, fmt

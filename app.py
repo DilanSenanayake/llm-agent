@@ -114,7 +114,7 @@ def _friendly_error(exc: BaseException) -> str:
 def _init_messages() -> None:
     if "messages" not in st.session_state:
         st.session_state["messages"] = [
-            {"role": "assistant", "content": _WELCOME},
+            {"role": "assistant", "content": _WELCOME, "kind": "system"},
         ]
 
 
@@ -135,7 +135,7 @@ def _ensure_user_id() -> str:
     st.session_state["user_id"] = user_id
     st.session_state["vector_store"] = None
     st.session_state.pop("last_upload_key", None)
-    st.session_state["messages"] = [{"role": "assistant", "content": _WELCOME}]
+    st.session_state["messages"] = [{"role": "assistant", "content": _WELCOME, "kind": "system"}]
     return user_id
 
 
@@ -249,13 +249,14 @@ def main() -> None:
                     names, chunk_count, err = process_uploaded_files(uploaded, user_id)
                 if err:
                     st.session_state["messages"].append(
-                        {"role": "assistant", "content": f"⚠️ {err}"}
+                        {"role": "assistant", "content": f"⚠️ {err}", "kind": "system"}
                     )
                 else:
                     file_list = ", ".join(f"**{n}**" for n in names)
                     st.session_state["messages"].append(
                         {
                             "role": "assistant",
+                            "kind": "system",
                             "content": (
                                 f"Added {len(names)} document(s): {file_list}. "
                                 f"Indexed {chunk_count} passage(s). Ask me anything about them."
@@ -294,7 +295,10 @@ def main() -> None:
     response_format = FORMAT_OPTIONS[selected_label]
 
     if prompt:
-        st.session_state["messages"].append({"role": "user", "content": prompt})
+        prior_messages = st.session_state["messages"]
+        st.session_state["messages"].append(
+            {"role": "user", "content": prompt, "kind": "chat"}
+        )
 
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -315,6 +319,7 @@ def main() -> None:
                             store,
                             user_instruction=prompt,
                             response_format=response_format,
+                            chat_messages=prior_messages,
                         )
                         touch_session(user_id)
                     except (ValueError, RuntimeError) as exc:
@@ -327,7 +332,7 @@ def main() -> None:
                         st.caption(f"Format: **{FORMAT_LABELS.get(fmt, fmt)}**")
                 st.markdown(reply)
 
-        assistant_msg: dict = {"role": "assistant", "content": reply}
+        assistant_msg: dict = {"role": "assistant", "content": reply, "kind": "chat"}
         if fmt:
             assistant_msg["format"] = fmt
         st.session_state["messages"].append(assistant_msg)
