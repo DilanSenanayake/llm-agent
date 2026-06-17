@@ -20,6 +20,7 @@ env/
 # Local app data
 uploads/
 vector_db/
+users/
 
 # IDEASentence-transformers / model cache
 .cache/

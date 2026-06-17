@@ -20,47 +20,80 @@ from langchain_core.documents import Document
 from backend.agent import run_agent
 from backend.chunker import chunk_text
 from backend.document_loader import SUPPORTED_EXTENSIONS, load_document
-from backend.paths import DEFAULT_INDEX_DIR, UPLOADS_DIR
+from backend.users import (
+    cleanup_expired_sessions,
+    create_session,
+    delete_user_workspace,
+    ensure_user_dirs,
+    generate_user_id,
+    get_user_index_dir,
+    get_user_uploads_dir,
+    is_session_valid,
+    touch_session,
+)
 from backend.vector_store import (
     build_or_merge_store,
-    clear_vector_store,
     load_vector_store,
     save_vector_store,
 )
 
 load_dotenv()
 
-UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+_HIDE_SIDEBAR_CSS = """
+<style>
+    section[data-testid="stSidebar"],
+    div[data-testid="stSidebar"],
+    [data-testid="collapsedControl"],
+    div[data-testid="stSidebarCollapsedControl"],
+    [data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+    div[data-testid="stAppViewContainer"] > section.main {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    div[data-testid="stAppViewContainer"] > section.main > div.block-container {
+        max-width: 100% !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+</style>
+"""
 
 
 def _friendly_error(exc: BaseException) -> str:
     return str(exc).strip() or exc.__class__.__name__
 
 
-def _get_store():
+def _ensure_user_id() -> str:
+    cleanup_expired_sessions()
+
+    user_id = st.session_state.get("user_id")
+    if user_id and is_session_valid(user_id):
+        touch_session(user_id)
+        return user_id
+
+    if user_id:
+        delete_user_workspace(user_id)
+
+    user_id = generate_user_id()
+    ensure_user_dirs(user_id)
+    create_session(user_id)
+    st.session_state["user_id"] = user_id
+    st.session_state["vector_store"] = None
+    st.session_state.pop("last_output", None)
+    st.session_state.pop("last_format", None)
+    return user_id
+
+
+def _get_store(user_id: str):
     if "vector_store" not in st.session_state or st.session_state["vector_store"] is None:
-        st.session_state["vector_store"] = load_vector_store()
+        st.session_state["vector_store"] = load_vector_store(get_user_index_dir(user_id))
     return st.session_state["vector_store"]
 
 
-def _invalidate_store_cache():
-    st.session_state["vector_store"] = None
-
-
-# Delete vector index, uploaded files, and in-memory session output.
-def clear_workspace() -> None:
-    clear_vector_store()
-    if UPLOADS_DIR.exists():
-        for path in UPLOADS_DIR.iterdir():
-            if path.is_file() and path.name != ".gitkeep":
-                path.unlink()
-    st.session_state.pop("last_output", None)
-    st.session_state.pop("last_format", None)
-    st.session_state["vector_store"] = None
-
-
 # Save files, chunk, embed, merge into FAISS. Returns (chunk_count, error_or_none).
-def process_uploaded_files(uploaded_files) -> tuple[int, str | None]:
+def process_uploaded_files(uploaded_files, user_id: str) -> tuple[int, str | None]:
     if not uploaded_files:
         return 0, "No files selected."
 
@@ -70,7 +103,8 @@ def process_uploaded_files(uploaded_files) -> tuple[int, str | None]:
         if suffix not in SUPPORTED_EXTENSIONS:
             return 0, f"Unsupported type for {uf.name!r}. Only PDF and DOCX are allowed."
 
-        dest = UPLOADS_DIR / uf.name
+        uploads_dir = get_user_uploads_dir(user_id)
+        dest = uploads_dir / uf.name
         try:
             dest.write_bytes(uf.getvalue())
         except Exception as exc:
@@ -95,13 +129,15 @@ def process_uploaded_files(uploaded_files) -> tuple[int, str | None]:
                 )
             )
 
+    index_dir = get_user_index_dir(user_id)
     try:
-        existing = load_vector_store()
+        existing = load_vector_store(index_dir)
         store = build_or_merge_store(all_docs, existing=existing)
-        save_vector_store(store)
+        save_vector_store(store, index_dir)
     except Exception as exc:
         return 0, f"Indexing failed: {_friendly_error(exc)}"
 
+    touch_session(user_id)
     st.session_state["vector_store"] = store
     return len(all_docs), None
 
@@ -111,7 +147,12 @@ def main() -> None:
         page_title="Agentic Knowledge Workspace",
         page_icon="📚",
         layout="wide",
+        initial_sidebar_state="collapsed",
     )
+
+    st.markdown(_HIDE_SIDEBAR_CSS, unsafe_allow_html=True)
+
+    user_id = _ensure_user_id()
 
     st.title("Agentic Knowledge Workspace")
     st.caption(
@@ -119,48 +160,27 @@ def main() -> None:
         "with RAG + Gemini — answers grounded in the most relevant passages."
     )
 
-    with st.sidebar:
-        st.subheader("Workspace")
-        st.text(f"Uploads: {UPLOADS_DIR}")
-        st.text(f"Vector DB: {DEFAULT_INDEX_DIR}")
-        if st.button("Reload index from disk"):
-            _invalidate_store_cache()
-            st.success("Cache cleared. Index will reload on next action.")
-        if st.button("Try again (clear database)", type="secondary"):
-            clear_workspace()
-            st.success("Vector database and uploads cleared. Start with new documents.")
-            st.rerun()
-        st.divider()
-        st.markdown(
-            "**Tip:** Process files after each upload batch. "
-            "New chunks are merged into your local FAISS index."
-        )
-
     col_u, col_q = st.columns((1, 1), gap="large")
 
     with col_u:
         st.subheader("1. Document upload")
-        st.info(
-            "Starting a new set of documents? Click 'Try again (clear database)' first "
-            "to avoid mixing vectors from older uploads."
-        )
         uploaded = st.file_uploader(
             "PDF or DOCX",
             type=["pdf", "docx"],
             accept_multiple_files=True,
-            help="Files are stored under the local uploads/ folder.",
+            help="Files are stored locally for your session.",
         )
 
         if st.button("Process uploaded documents", type="primary"):
             with st.spinner("Extracting text, chunking, embedding, and updating FAISS…"):
-                count, err = process_uploaded_files(uploaded)
+                count, err = process_uploaded_files(uploaded, user_id)
             if err:
                 st.error(err)
             else:
                 st.success(f"Indexed {count} chunk(s) successfully.")
 
         st.subheader("Processing status")
-        store = _get_store()
+        store = _get_store(user_id)
         if store is None:
             st.info("No vector index yet. Upload and process documents to begin.")
         else:
@@ -201,26 +221,13 @@ def main() -> None:
         )
         response_format = format_options[selected_label]
 
-        b1, b2 = st.columns([1, 1])
-        with b1:
-            do_generate = st.button("Generate", type="primary", use_container_width=True)
-        with b2:
-            do_try_again = st.button(
-                "Try again (clear database)",
-                use_container_width=True,
-                help="Deletes the FAISS index, uploaded files, and last output so you can start fresh.",
-            )
+        do_generate = st.button("Generate", type="primary", use_container_width=True)
 
         st.subheader("3. Generated output")
         output_placeholder = st.container()
 
-        if do_try_again:
-            clear_workspace()
-            st.success("Vector database and uploads cleared. Upload and process new documents.")
-            st.rerun()
-
         if do_generate:
-            store = _get_store()
+            store = _get_store(user_id)
             if store is None:
                 st.warning("Process at least one document before generating output.")
             elif not (instruction or "").strip():
@@ -240,6 +247,7 @@ def main() -> None:
                     except Exception as exc:
                         st.error(f"Unexpected error: {_friendly_error(exc)}")
                     else:
+                        touch_session(user_id)
                         st.session_state["last_output"] = text
                         st.session_state["last_format"] = fmt
                         with output_placeholder:
