@@ -1,10 +1,10 @@
 # Agentic Knowledge Workspace
 
-Local-first MVP for **document upload → semantic indexing → RAG-powered Q&A, summaries, reports, slides, and comparisons** using **Streamlit**, **LangChain** (documents + FAISS), **sentence-transformers** (`all-MiniLM-L6-v2`), and the **Google Gen AI SDK** (Gemini).
+Local-first MVP for **document upload → semantic indexing → RAG-powered Q&A** using **Streamlit**, **LangChain** (documents + FAISS), **sentence-transformers** (`all-MiniLM-L6-v2`), and the **Google Gen AI SDK** (Gemini).
 
 ## Overview
 
-Users upload **PDF** or **DOCX** files. The app extracts and cleans text, splits it into **500-word chunks with 50-word overlap**, embeds chunks, and stores them in a **local FAISS** index under `vector_db/`. When you click **Generate**, a lightweight **agent** classifies intent, **retrieves** relevant chunks, and **Gemini** produces **markdown** grounded in that context.
+Users upload **PDF** or **DOCX** files. The app extracts and cleans text, splits it into **500-word chunks with 50-word overlap**, embeds chunks, and stores them in a **local FAISS** index under `vector_db/`. When you click **Generate**, your instruction drives **retrieval** of the most relevant chunks and **Gemini** produces **markdown** grounded in that context.
 
 ## Architecture
 
@@ -17,8 +17,8 @@ app.py (Streamlit)
     ├── backend/embeddings.py        # sentence-transformers MiniLM → LangChain Embeddings
     ├── backend/vector_store.py      # FAISS build / merge / save / load
     ├── backend/retriever.py         # similarity search + context formatting
-    ├── backend/generator.py         # Gemini prompts (per-intent, google.genai)
-    └── backend/agent.py             # intent → retrieve → generate
+    ├── backend/generator.py         # Gemini prompts (per format, google.genai)
+    └── backend/agent.py             # instruction → retrieve → generate
 ```
 
 - **Uploads** land in `uploads/` (no auth, single workspace on your machine).
@@ -29,19 +29,16 @@ app.py (Streamlit)
 
 1. Documents are chunked and turned into embeddings with **all-MiniLM-L6-v2**.
 2. Embeddings are stored in **FAISS** for fast similarity search.
-3. Your instruction (and/or selected output type) drives a **query embedding**.
+3. Your instruction drives a **query embedding** for similarity search.
 4. The **top similar chunks** are concatenated into a bounded **context block** (max ~12k characters).
 5. **Gemini** is instructed to **only** use that context, reducing unsupported extrapolation.
 
-## How the agent works
+## How generation works
 
-Flow: **User instruction → intent → retrieval → generation → markdown output**.
+Flow: **User instruction → retrieval → generation → markdown output**.
 
-- **Intents**: `ask`, `summary`, `report`, `slides`, `compare`.
-- **Intent detection** (priority order):
-  1. **Output type** selectbox in the UI (forces a specific format).
-  2. **Keywords** in your text (e.g. “compare”, “slides”, “summarize”, “report”).
-  3. **Default** to `ask` when nothing else matches.
+- **Response formats**: Answer, Brief summary, Extract, Compare (selected in the UI).
+- **Instruction is required** — it is used both to retrieve relevant chunks and to steer the answer.
 - **No autonomous tool loops** — one retrieval pass and one LLM call per generation.
 
 ## Setup
@@ -105,8 +102,8 @@ The first run may be slow while **all-MiniLM-L6-v2** downloads; later runs use t
 
 1. Upload one or more **PDF** / **DOCX** files.
 2. Click **Process uploaded documents** (extract, chunk, embed, merge into FAISS).
-3. Enter a **question or instruction** (optional but improves retrieval focus).
-4. Optionally choose an **output type** (Auto-detect, Ask, Summary, Report, Slides, or Compare).
+3. Enter a **question or instruction** (required — used to find relevant passages).
+4. Choose a **response format** (Answer, Brief summary, Extract, or Compare).
 5. Click **Generate**.
 6. Read the markdown result; optionally **download as TXT**.
 

@@ -55,7 +55,7 @@ def clear_workspace() -> None:
             if path.is_file() and path.name != ".gitkeep":
                 path.unlink()
     st.session_state.pop("last_output", None)
-    st.session_state.pop("last_intent", None)
+    st.session_state.pop("last_format", None)
     st.session_state["vector_store"] = None
 
 
@@ -115,8 +115,8 @@ def main() -> None:
 
     st.title("Agentic Knowledge Workspace")
     st.caption(
-        "Upload documents, index them locally, and ask questions or generate "
-        "summaries, reports, slides, and comparisons with RAG + Gemini."
+        "Upload documents, index them locally, and ask focused questions "
+        "with RAG + Gemini — answers grounded in the most relevant passages."
     )
 
     with st.sidebar:
@@ -173,32 +173,33 @@ def main() -> None:
     with col_q:
         st.subheader("2. Ask the workspace")
         instruction = st.text_area(
-            "Your question or instruction",
+            "Your question or instruction (required)",
             height=140,
             placeholder=(
-                'e.g. "What are the main risks?" or "Summarize compliance themes" '
-                'or "Compare methodology vs results sections"'
+                'e.g. "What are the termination clauses?" · '
+                '"Summarize the data retention policy" · '
+                '"List all SLA thresholds" · '
+                '"Compare Plan A vs Plan B on pricing"'
             ),
+            help="This text is used to find relevant passages in your documents.",
         )
 
-        intent_options = {
-            "Auto-detect": None,
-            "Ask": "ask",
-            "Summary": "summary",
-            "Report": "report",
-            "Slides": "slides",
+        format_options = {
+            "Answer": "answer",
+            "Brief summary": "brief_summary",
+            "Extract": "extract",
             "Compare": "compare",
         }
         selected_label = st.selectbox(
-            "Output type (optional)",
-            options=list(intent_options.keys()),
+            "Response format",
+            options=list(format_options.keys()),
             index=0,
             help=(
-                "Leave on Auto-detect to let the agent infer intent from your text "
-                "(defaults to Ask). Select a type to force that format."
+                "Answer: direct response. Brief summary: short overview of your topic. "
+                "Extract: lists, tables, or key facts. Compare: side-by-side (name both items)."
             ),
         )
-        forced_intent = intent_options[selected_label]
+        response_format = format_options[selected_label]
 
         b1, b2 = st.columns([1, 1])
         with b1:
@@ -222,13 +223,15 @@ def main() -> None:
             store = _get_store()
             if store is None:
                 st.warning("Process at least one document before generating output.")
+            elif not (instruction or "").strip():
+                st.warning("Enter a question or instruction before generating.")
             else:
                 with st.spinner("Retrieving context and calling Gemini…"):
                     try:
-                        text, intent = run_agent(
+                        text, fmt = run_agent(
                             store,
                             user_instruction=instruction,
-                            forced_intent=forced_intent,
+                            response_format=response_format,
                         )
                     except ValueError as exc:
                         st.error(_friendly_error(exc))
@@ -238,26 +241,26 @@ def main() -> None:
                         st.error(f"Unexpected error: {_friendly_error(exc)}")
                     else:
                         st.session_state["last_output"] = text
-                        st.session_state["last_intent"] = intent
+                        st.session_state["last_format"] = fmt
                         with output_placeholder:
-                            st.caption(f"Detected intent: **{intent}**")
+                            st.caption(f"Format: **{fmt}**")
                             st.markdown(text)
                         st.download_button(
                             label="Download as TXT",
                             data=text,
-                            file_name=f"output_{intent}.txt",
+                            file_name=f"output_{fmt}.txt",
                             mime="text/plain",
                             use_container_width=False,
                         )
 
         elif st.session_state.get("last_output"):
             with output_placeholder:
-                st.caption(f"Intent: **{st.session_state.get('last_intent', 'unknown')}**")
+                st.caption(f"Format: **{st.session_state.get('last_format', 'unknown')}**")
                 st.markdown(st.session_state["last_output"])
             st.download_button(
                 label="Download last output as TXT",
                 data=st.session_state["last_output"],
-                file_name=f"output_{st.session_state.get('last_intent', 'result')}.txt",
+                file_name=f"output_{st.session_state.get('last_format', 'result')}.txt",
                 mime="text/plain",
             )
 

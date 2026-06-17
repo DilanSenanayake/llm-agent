@@ -6,7 +6,7 @@ from typing import Literal
 from google import genai
 from google.genai.types import GenerateContentConfig
 
-IntentType = Literal["ask", "summary", "report", "slides", "compare"]
+ResponseFormat = Literal["answer", "brief_summary", "extract", "compare"]
 
 DEFAULT_MODEL = "gemini-3-flash-preview"
 MODEL_FALLBACKS = (
@@ -41,55 +41,44 @@ def _is_model_not_found(exc: BaseException) -> bool:
     return "not_found" in msg or "404" in msg
 
 
-ASK_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+ANSWER_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
 Answer the user's question directly and concisely.
 If the context is insufficient, say what is missing instead of inventing facts.
 Use markdown where helpful (headings, lists, bold for emphasis)."""
 
 
-SUMMARY_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+BRIEF_SUMMARY_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
 If the context is insufficient, say what is missing instead of inventing facts.
-Produce markdown with:
-## Concise Summary
-## Key Points
-## Important Insights
+Produce a short overview of the topic named in the user instruction — not a full document review.
+Use markdown with:
+## Summary
+## Key Points (3–7 bullets)
 Keep the tone clear and professional."""
 
 
-REPORT_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
-Synthesize across chunks; do not invent sources or facts not supported by the context.
-Produce markdown with exactly these sections:
-## Introduction
-## Main Findings
-## Analysis
-## Conclusion
-Maintain coherence and professional tone."""
-
-
-SLIDES_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
+EXTRACT_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
 If the context is insufficient, say what is missing instead of inventing facts.
-Produce a slide deck outline in markdown. For each slide use:
-### Slide N: Title
-- Bullet points (3–5 per slide, concise)
-Include a title slide and a closing slide. Keep content presentation-ready."""
+Extract only the facts, items, or data the user asked for — no narrative essay.
+Prefer bullets, numbered lists, or markdown tables. Include dates, names, numbers, and
+requirements when present. Do not pad with commentary."""
 
 
 COMPARE_SYSTEM = """You are a careful analyst. You ONLY use the RETRIEVED CONTEXT below.
 If the context is insufficient, say what is missing instead of inventing facts.
+Compare only what the user named in their instruction.
 Produce markdown with:
 ## Overview
-## Comparison Table (use markdown table when possible)
+## Comparison Table (use a markdown table when possible)
 ## Key Similarities
 ## Key Differences
 ## Conclusion
 Be balanced and cite only what the context supports."""
 
 
-_SYSTEM_BY_INTENT: dict[IntentType, str] = {
-    "ask": ASK_SYSTEM,
-    "summary": SUMMARY_SYSTEM,
-    "report": REPORT_SYSTEM,
-    "slides": SLIDES_SYSTEM,
+_SYSTEM_BY_FORMAT: dict[ResponseFormat, str] = {
+    "answer": ANSWER_SYSTEM,
+    "brief_summary": BRIEF_SUMMARY_SYSTEM,
+    "extract": EXTRACT_SYSTEM,
     "compare": COMPARE_SYSTEM,
 }
 
@@ -103,14 +92,14 @@ Generate the requested output following the system rules. Use markdown."""
 
 
 def generate_rag_output(
-    intent: IntentType,
+    response_format: ResponseFormat,
     context: str,
     instruction: str,
 ) -> str:
-    system = _SYSTEM_BY_INTENT[intent]
+    system = _SYSTEM_BY_FORMAT[response_format]
     user_content = USER_TEMPLATE.format(
         context=context.strip(),
-        instruction=(instruction or "").strip() or "Follow the system format.",
+        instruction=instruction.strip(),
     )
 
     client = _get_client()
