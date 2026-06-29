@@ -2,6 +2,14 @@
 showSidebarNavigation = false
 toolbarMode = "minimal"
 
+[server]
+# Avoid Streamlit probing transformers vision submodules (needs torchvision).
+fileWatcherType = "none"
+
+[runner]
+# Reduces import introspection that can trigger optional ML deps on Cloud.
+magicEnabled = false
+
 [theme]
 base = "dark"
 primaryColor = "#10A37F"
