@@ -63,6 +63,26 @@ def rebuild_vector_store(user_id: str):
     return store
 
 
+def remove_uploaded_documents(user_id: str, filenames: set[str]) -> str | None:
+    """Remove files from disk and rebuild the vector index."""
+    if not filenames:
+        return None
+    uploads_dir = get_user_uploads_dir(user_id)
+    try:
+        for name in filenames:
+            path = uploads_dir / name
+            if path.exists():
+                path.unlink()
+        rebuild_vector_store(user_id)
+    except Exception as exc:
+        return f"Could not remove document(s): {exc}"
+    return None
+
+
+def indexed_file_names(user_id: str) -> set[str]:
+    return {doc["name"] for doc in list_uploaded_documents(user_id)}
+
+
 def process_uploaded_files(
     uploaded_files,
     user_id: str,

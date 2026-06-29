@@ -27,10 +27,20 @@ DOCUCHAT_CSS = """
         min-height: 0;
     }
 
+    [data-testid="stSidebarCollapseButton"],
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="collapsedControl"] {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+    }
+
     section[data-testid="stSidebar"] {
         width: 280px !important;
         min-width: 280px !important;
         max-width: 280px !important;
+        transform: none !important;
+        margin-left: 0 !important;
         background-color: var(--dc-sidebar) !important;
         border-right: 1px solid var(--dc-border) !important;
     }
@@ -163,7 +173,8 @@ DOCUCHAT_CSS = """
         margin: 0 auto;
         pointer-events: auto;
     }
-    .dc-input-shell {
+    .dc-input-shell,
+    div[data-testid="stAppViewContainer"] > section.main form[data-testid="stForm"] {
         background: var(--dc-card);
         border: 1px solid var(--dc-border);
         border-radius: 16px;
@@ -171,18 +182,28 @@ DOCUCHAT_CSS = """
         box-shadow: 0 4px 24px rgba(0,0,0,0.35);
     }
     .dc-input-shell textarea,
-    .dc-input-shell input {
+    .dc-input-shell input,
+    div[data-testid="stAppViewContainer"] > section.main form[data-testid="stForm"] input {
         background: transparent !important;
         color: var(--dc-text) !important;
         border: none !important;
         font-size: 0.95rem !important;
     }
-    .dc-input-shell [data-testid="stSelectbox"] > div > div {
+    .dc-input-shell [data-testid="stSelectbox"] > div > div,
+    div[data-testid="stAppViewContainer"] > section.main form[data-testid="stForm"] [data-testid="stSelectbox"] > div > div {
         background: var(--dc-bg) !important;
         border-color: var(--dc-border) !important;
         color: var(--dc-text) !important;
         min-height: 2.5rem !important;
         border-radius: 10px !important;
+    }
+
+    /* Hide empty markdown wrappers left from legacy HTML injections */
+    div[data-testid="stAppViewContainer"] > section.main
+        [data-testid="stMarkdownContainer"]:empty {
+        display: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     div[data-testid="stSidebar"] button[kind="primary"],
@@ -223,43 +244,10 @@ DOCUCHAT_CSS = """
     }
 
     @media (max-width: 768px) {
-        .dc-input-dock { left: 0; }
         section[data-testid="stSidebar"] {
             width: 100% !important;
             min-width: 100% !important;
         }
-    }
-
-    #dc-input-anchor {
-        height: 0;
-        margin: 0;
-        padding: 0;
-    }
-    #dc-input-anchor ~ div[data-testid="stForm"] {
-        position: fixed;
-        bottom: 0;
-        left: 280px;
-        right: 0;
-        z-index: 999;
-        background: linear-gradient(transparent, var(--dc-bg) 20%);
-        padding: 0 1.5rem 1.25rem;
-        max-width: calc(52rem + 3rem);
-        margin: 0 auto;
-        pointer-events: auto;
-    }
-    #dc-input-anchor ~ div:has(.dc-input-pills) {
-        position: fixed;
-        bottom: 5.5rem;
-        left: 280px;
-        right: 0;
-        max-width: 52rem;
-        margin: 0 auto;
-        padding: 0 1.5rem;
-        z-index: 998;
-    }
-    @media (max-width: 768px) {
-        #dc-input-anchor ~ div[data-testid="stForm"] { left: 0; }
-        #dc-input-anchor ~ div:has(.dc-input-pills) { left: 0; }
     }
 </style>
 """

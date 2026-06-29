@@ -25,9 +25,10 @@ from backend.chats import (
     reset_chats,
 )
 from backend.documents import (
+    indexed_file_names,
     list_uploaded_documents,
     process_uploaded_files,
-    remove_document,
+    remove_uploaded_documents,
 )
 from backend.generator import ResponseFormat
 from backend.storage import format_bytes, get_storage_usage
@@ -78,6 +79,15 @@ def _friendly_error(exc: BaseException) -> str:
     return str(exc).strip() or exc.__class__.__name__
 
 
+def _loading_html(label: str = "Searching your documents") -> str:
+    return (
+        f'<div class="dc-loader">'
+        f'<span class="dc-loader-dots"><span></span><span></span><span></span></span>'
+        f"<span>{label}</span>"
+        f"</div>"
+    )
+
+
 def _ensure_user_id() -> str:
     cleanup_expired_sessions()
 
@@ -95,6 +105,8 @@ def _ensure_user_id() -> str:
     st.session_state.user_id = user_id
     st.session_state.vector_store = None
     st.session_state.pop("last_upload_key", None)
+    st.session_state.pop("uploader_file_names", None)
+    st.session_state.pop("uploader_had_files", None)
     reset_chats()
     return user_id
 
@@ -113,34 +125,45 @@ def _upload_fingerprint(uploaded_files) -> tuple[tuple[str, int], ...]:
     return tuple((uf.name, len(uf.getvalue())) for uf in uploaded_files)
 
 
-def _clear_workspace(user_id: str) -> None:
-    clear_vector_store(get_user_index_dir(user_id))
-    uploads_dir = get_user_uploads_dir(user_id)
-    if uploads_dir.exists():
-        for path in uploads_dir.iterdir():
-            if path.is_file() and path.name != ".gitkeep":
-                path.unlink()
-    st.session_state.vector_store = None
+def _reset_sidebar_uploader() -> None:
+    st.session_state.sidebar_uploader_key = (
+        st.session_state.get("sidebar_uploader_key", 0) + 1
+    )
     st.session_state.pop("last_upload_key", None)
-    reset_chats()
 
 
-def _render_sidebar(user_id: str) -> None:
-    st.markdown(
-        '<p class="dc-logo">Docu<span>Chat</span></p>',
-        unsafe_allow_html=True,
-    )
+def _init_uploader_tracking(user_id: str) -> None:
+    if "uploader_file_names" not in st.session_state:
+        st.session_state.uploader_file_names = indexed_file_names(user_id)
 
-    uploaded = st.file_uploader(
-        "Upload PDF or DOCX",
-        type=["pdf", "docx"],
-        accept_multiple_files=True,
-        label_visibility="collapsed",
-        key="sidebar_uploader",
-    )
 
-    used, limit = get_storage_usage(user_id)
-    st.caption(f"{format_bytes(used)} / {format_bytes(limit)}")
+def _widget_file_names(uploaded) -> set[str] | None:
+    """Names in the uploader widget, or None if the widget was not touched."""
+    if uploaded is not None:
+        st.session_state.uploader_had_files = True
+        return {uf.name for uf in uploaded}
+    if st.session_state.get("uploader_had_files"):
+        return set()
+    return None
+
+
+def _sync_uploader_with_disk(user_id: str, uploaded) -> bool:
+    """Sync disk index with the uploader widget (adds and removals)."""
+    _init_uploader_tracking(user_id)
+    widget_names = _widget_file_names(uploaded)
+    if widget_names is None:
+        return False
+
+    changed = False
+    tracked: set[str] = set(st.session_state.uploader_file_names)
+    removed = tracked - widget_names
+    if removed:
+        err = remove_uploaded_documents(user_id, removed)
+        if err:
+            st.error(err)
+            return False
+        tracked -= removed
+        changed = True
 
     if uploaded:
         fingerprint = _upload_fingerprint(uploaded)
@@ -150,42 +173,69 @@ def _render_sidebar(user_id: str) -> None:
                 if err:
                     status.update(label="Failed", state="error")
                     st.error(err)
-                else:
-                    status.update(label=f"{len(names)} file(s) indexed", state="complete")
-                    _invalidate_store(user_id)
-                    append_message(
-                        {
-                            "role": "assistant",
-                            "kind": "system",
-                            "content": (
-                                f"Indexed **{', '.join(names)}** "
-                                f"({chunk_count} passages)."
-                            ),
-                        }
-                    )
+                    return False
+                status.update(label=f"{len(names)} file(s) indexed", state="complete")
+                append_message(
+                    {
+                        "role": "assistant",
+                        "kind": "system",
+                        "content": (
+                            f"Indexed **{', '.join(names)}** "
+                            f"({chunk_count} passages)."
+                        ),
+                    }
+                )
             st.session_state.last_upload_key = fingerprint
-            st.rerun()
+            tracked = indexed_file_names(user_id)
+            changed = True
+
+    st.session_state.uploader_file_names = tracked
+    if not tracked:
+        st.session_state.uploader_had_files = False
+    return changed
+
+
+def _clear_workspace(user_id: str) -> None:
+    clear_vector_store(get_user_index_dir(user_id))
+    uploads_dir = get_user_uploads_dir(user_id)
+    if uploads_dir.exists():
+        for path in uploads_dir.iterdir():
+            if path.is_file() and path.name != ".gitkeep":
+                path.unlink()
+    st.session_state.vector_store = None
+    st.session_state.pop("last_upload_key", None)
+    st.session_state.uploader_file_names = set()
+    st.session_state.uploader_had_files = False
+    reset_chats()
+    _reset_sidebar_uploader()
+
+
+def _render_sidebar(user_id: str) -> None:
+    st.markdown(
+        '<p class="dc-logo">Docu<span>Chat</span></p>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<p class="dc-sidebar-label">Documents</p>', unsafe_allow_html=True)
+
+    uploaded = st.file_uploader(
+        "Upload PDF or DOCX",
+        type=["pdf", "docx"],
+        accept_multiple_files=True,
+        label_visibility="collapsed",
+        key=f"sidebar_uploader_{st.session_state.get('sidebar_uploader_key', 0)}",
+    )
+
+    if _sync_uploader_with_disk(user_id, uploaded):
+        _invalidate_store(user_id)
+        st.rerun()
 
     docs = list_uploaded_documents(user_id)
+    used, limit = get_storage_usage(user_id)
     if docs:
-        with st.container(height=96, border=False):
-            for doc in docs:
-                c1, c2 = st.columns([5, 1])
-                with c1:
-                    st.markdown(
-                        f'<span class="dc-doc-pill">📄 {doc["name"]}</span>',
-                        unsafe_allow_html=True,
-                    )
-                with c2:
-                    if st.button("✕", key=f"rm_{doc['name']}", help=f"Remove {doc['name']}"):
-                        err = remove_document(user_id, doc["name"])
-                        if err:
-                            st.error(err)
-                        else:
-                            _invalidate_store(user_id)
-                            st.rerun()
+        st.caption(f"{len(docs)} file(s) · {format_bytes(used)} / {format_bytes(limit)}")
     else:
-        st.caption("No documents yet.")
+        st.caption(f"{format_bytes(used)} / {format_bytes(limit)}")
 
     with st.expander("Settings", expanded=False):
         st.selectbox(
@@ -264,26 +314,35 @@ def _stream_assistant_reply(
 
     fmt: ResponseFormat | None = None
     with st.chat_message("assistant"):
+        slot = st.empty()
+        slot.markdown(_loading_html("Searching your documents"), unsafe_allow_html=True)
         try:
-            with st.spinner("Searching…"):
-                stream, fmt, _docs = stream_agent(
-                    store,
-                    user_instruction=prompt,
-                    response_format=response_format,
-                    chat_messages=prior,
-                )
-            reply = st.write_stream(stream)
-            if fmt:
+            stream, fmt, _docs = stream_agent(
+                store,
+                user_instruction=prompt,
+                response_format=response_format,
+                chat_messages=prior,
+            )
+            slot.markdown(_loading_html("Thinking..."), unsafe_allow_html=True)
+            parts: list[str] = []
+            for chunk in stream:
+                parts.append(chunk)
+                slot.markdown("".join(parts))
+            reply = "".join(parts).strip()
+            if not reply:
+                reply = "No response was generated. Try again."
+            slot.markdown(reply)
+            if fmt and reply and not reply.startswith("⚠️"):
                 st.caption(f"**{FORMAT_LABELS.get(fmt, fmt)}**")
             touch_session(user_id)
         except (ValueError, RuntimeError) as exc:
             reply = f"⚠️ {_friendly_error(exc)}"
             fmt = None
-            st.markdown(reply)
+            slot.markdown(reply)
         except Exception as exc:
             reply = f"⚠️ Unexpected error: {_friendly_error(exc)}"
             fmt = None
-            st.markdown(reply)
+            slot.markdown(reply)
 
     msg: dict = {"role": "assistant", "content": reply, "kind": "chat"}
     if fmt:
@@ -300,13 +359,10 @@ def _queue_prompt(prompt: str, response_format: ResponseFormat | Literal["auto"]
 
 
 def _render_input_bar() -> None:
-    st.markdown('<div id="dc-input-anchor"></div>', unsafe_allow_html=True)
-
     default_format = st.session_state.get("settings_format", "Auto")
     format_idx = list(FORMAT_OPTIONS.keys()).index(default_format)
 
     with st.form("chat_form", clear_on_submit=True):
-        st.markdown('<div class="dc-input-shell">', unsafe_allow_html=True)
         c_fmt, c_msg, c_send = st.columns([1.1, 5, 0.55], vertical_alignment="bottom")
         with c_fmt:
             selected = st.selectbox(
@@ -325,7 +381,6 @@ def _render_input_bar() -> None:
             )
         with c_send:
             submitted = st.form_submit_button("↑", use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
 
     if submitted:
         if (prompt or "").strip():

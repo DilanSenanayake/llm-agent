@@ -28,6 +28,19 @@ LAYOUT_CSS = """
         min-height: 3rem !important;
     }
 
+    section[data-testid="stSidebar"] [data-testid="stFileUploader"] small,
+    section[data-testid="stSidebar"] [data-testid="stFileUploader"] [data-testid="stCaptionContainer"],
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        font-size: 0 !important;
+        line-height: 0 !important;
+    }
+
     /* ── Main flex column ── */
     div[data-testid="stAppViewContainer"] > section.main > div.block-container {
         height: 100vh;
@@ -68,26 +81,9 @@ LAYOUT_CSS = """
         margin-top: auto !important;
     }
 
-    #dc-input-anchor {
-        display: none;
-    }
-
-    #dc-input-anchor ~ div[data-testid="stForm"] {
-        position: static !important;
-        left: auto !important;
-        right: auto !important;
-        bottom: auto !important;
-        background: transparent !important;
-        padding: 0 !important;
-        max-width: none !important;
-        margin: 0 !important;
-        z-index: auto !important;
-    }
-
-    #dc-input-anchor ~ [data-testid="stVerticalBlock"]:has([data-testid="stAlert"]) {
-        flex-shrink: 0;
-        margin-top: auto !important;
-        margin-bottom: 0 !important;
+    div[data-testid="stAppViewContainer"] > section.main form[data-testid="stForm"] [data-testid="stHorizontalBlock"] {
+        gap: 0.5rem;
+        align-items: end;
     }
 
     /* ── Home ── */
@@ -162,6 +158,49 @@ LAYOUT_CSS = """
         margin-bottom: 0.35rem !important;
         padding: 0.4rem 0.65rem !important;
         font-size: 0.8rem !important;
+    }
+
+    /* ── Response loading animation ── */
+    .dc-loader {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.35rem 0;
+        color: var(--dc-muted);
+        font-size: 0.85rem;
+    }
+
+    .dc-loader-dots {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+    }
+
+    .dc-loader-dots span {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--dc-accent);
+        animation: dcLoaderBounce 1.2s infinite ease-in-out both;
+    }
+
+    .dc-loader-dots span:nth-child(1) { animation-delay: 0s; }
+    .dc-loader-dots span:nth-child(2) { animation-delay: 0.15s; }
+    .dc-loader-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes dcLoaderBounce {
+        0%, 80%, 100% {
+            transform: translateY(0) scale(0.75);
+            opacity: 0.4;
+        }
+        40% {
+            transform: translateY(-5px) scale(1);
+            opacity: 1;
+        }
+    }
+
+    [data-testid="stChatMessage"]:has(.dc-loader) {
+        animation: dcFadeIn 0.2s ease;
     }
 
     @media (max-width: 768px) {

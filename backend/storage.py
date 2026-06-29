@@ -27,6 +27,18 @@ def dir_size_bytes(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
+def uploads_size_bytes(user_id: str) -> int:
+    """Total bytes of indexed upload files only (not vector index or metadata)."""
+    uploads_dir = get_user_uploads_dir(user_id)
+    if not uploads_dir.exists():
+        return 0
+    return sum(
+        f.stat().st_size
+        for f in uploads_dir.iterdir()
+        if f.is_file() and f.name != ".gitkeep"
+    )
+
+
 def format_bytes(size: int) -> str:
     if size < 1024:
         return f"{size} B"
@@ -36,7 +48,7 @@ def format_bytes(size: int) -> str:
 
 
 def get_storage_usage(user_id: str) -> tuple[int, int]:
-    used = dir_size_bytes(get_user_uploads_dir(user_id))
+    used = uploads_size_bytes(user_id)
     limit = upload_limit_bytes()
     return used, limit
 
