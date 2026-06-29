@@ -1,5 +1,6 @@
 # Uploaded document listing, indexing, and removal.
 
+from collections.abc import Callable
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -86,9 +87,15 @@ def indexed_file_names(user_id: str) -> set[str]:
 def process_uploaded_files(
     uploaded_files,
     user_id: str,
+    *,
+    on_phase: Callable[[str], None] | None = None,
 ) -> tuple[list[str], int, str | None]:
     if not uploaded_files:
         return [], 0, None
+
+    def _phase(label: str) -> None:
+        if on_phase is not None:
+            on_phase(label)
 
     incoming = [(uf.name, len(uf.getvalue())) for uf in uploaded_files]
     ok, err = check_upload_capacity(user_id, incoming)
@@ -100,6 +107,7 @@ def process_uploaded_files(
     uploads_dir = get_user_uploads_dir(user_id)
     uploads_dir.mkdir(parents=True, exist_ok=True)
 
+    _phase("Uploading files…")
     for uf in uploaded_files:
         suffix = Path(uf.name).suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
@@ -109,6 +117,7 @@ def process_uploaded_files(
         dest.write_bytes(uf.getvalue())
         saved_names.append(uf.name)
 
+    _phase("Indexing documents…")
     try:
         store = rebuild_vector_store(user_id)
     except ValueError as exc:

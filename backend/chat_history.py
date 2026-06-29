@@ -35,6 +35,8 @@ def select_chat_history(messages: list[dict], max_turns: int | None = None) -> l
             continue
         if _is_system_message(message):
             continue
+        if message.get("error"):
+            continue
         chat.append(message)
     return chat[-(limit * 2) :]
 

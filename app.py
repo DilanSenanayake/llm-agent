@@ -23,6 +23,7 @@ from backend.chats import (
     has_user_messages,
     init_chats,
     reset_chats,
+    set_messages,
 )
 from backend.documents import (
     indexed_file_names,
@@ -41,6 +42,7 @@ from backend.users import (
     get_user_index_dir,
     get_user_uploads_dir,
     is_session_valid,
+    restore_user_id,
     touch_session,
 )
 from backend.vector_store import clear_vector_store, load_vector_store
@@ -74,6 +76,8 @@ SUGGESTED_PROMPTS: list[dict[str, str | ResponseFormat]] = [
     {"format": "compare", "prompt": "Methodology vs findings"},
 ]
 
+_SESSION_QP = "sid"
+
 
 def _friendly_error(exc: BaseException) -> str:
     return str(exc).strip() or exc.__class__.__name__
@@ -88,26 +92,49 @@ def _loading_html(label: str = "Searching your documents") -> str:
     )
 
 
+def _indexing_html(label: str) -> str:
+    return (
+        f'<div class="dc-index-panel">'
+        f'<span class="dc-loader-dots"><span></span><span></span><span></span></span>'
+        f"<span><strong>{label}</strong></span>"
+        f"</div>"
+    )
+
+
+def _persist_session_in_url(user_id: str) -> None:
+    if st.query_params.get(_SESSION_QP) != user_id:
+        st.query_params[_SESSION_QP] = user_id
+
+
 def _ensure_user_id() -> str:
     cleanup_expired_sessions()
 
     user_id = st.session_state.get("user_id")
     if user_id and is_session_valid(user_id):
         touch_session(user_id)
+        _persist_session_in_url(user_id)
         return user_id
 
     if user_id:
         delete_user_workspace(user_id)
 
+    restored = restore_user_id(st.query_params.get(_SESSION_QP))
+    if restored:
+        st.session_state.user_id = restored
+        _persist_session_in_url(restored)
+        return restored
+
     user_id = generate_user_id()
     ensure_user_dirs(user_id)
     create_session(user_id)
     st.session_state.user_id = user_id
+    _persist_session_in_url(user_id)
     st.session_state.vector_store = None
     st.session_state.pop("last_upload_key", None)
     st.session_state.pop("uploader_file_names", None)
     st.session_state.pop("uploader_had_files", None)
-    reset_chats()
+    st.session_state.pop("uploader_widget_names", None)
+    reset_chats(user_id)
     return user_id
 
 
@@ -137,61 +164,82 @@ def _init_uploader_tracking(user_id: str) -> None:
         st.session_state.uploader_file_names = indexed_file_names(user_id)
 
 
-def _widget_file_names(uploaded) -> set[str] | None:
-    """Names in the uploader widget, or None if the widget was not touched."""
-    if uploaded is not None:
-        st.session_state.uploader_had_files = True
-        return {uf.name for uf in uploaded}
-    if st.session_state.get("uploader_had_files"):
-        return set()
-    return None
-
-
 def _sync_uploader_with_disk(user_id: str, uploaded) -> bool:
-    """Sync disk index with the uploader widget (adds and removals)."""
+    """Sync disk with uploader changes made in the current browser session."""
     _init_uploader_tracking(user_id)
-    widget_names = _widget_file_names(uploaded)
-    if widget_names is None:
-        return False
-
     changed = False
-    tracked: set[str] = set(st.session_state.uploader_file_names)
-    removed = tracked - widget_names
-    if removed:
-        err = remove_uploaded_documents(user_id, removed)
+
+    if not uploaded:
+        # Streamlit returns [] on refresh — never treat that as "delete everything".
+        prev_widget: set[str] | None = st.session_state.get("uploader_widget_names")
+        if not prev_widget:
+            return False
+        err = remove_uploaded_documents(user_id, prev_widget)
         if err:
             st.error(err)
             return False
-        tracked -= removed
-        changed = True
+        st.session_state.pop("uploader_widget_names", None)
+        st.session_state.uploader_had_files = False
+        st.session_state.pop("last_upload_key", None)
+        st.session_state.uploader_file_names = indexed_file_names(user_id)
+        return True
 
-    if uploaded:
-        fingerprint = _upload_fingerprint(uploaded)
-        if fingerprint != st.session_state.get("last_upload_key"):
-            with st.status("Indexing…", expanded=False) as status:
-                names, chunk_count, err = process_uploaded_files(uploaded, user_id)
-                if err:
-                    status.update(label="Failed", state="error")
-                    st.error(err)
-                    return False
-                status.update(label=f"{len(names)} file(s) indexed", state="complete")
-                append_message(
-                    {
-                        "role": "assistant",
-                        "kind": "system",
-                        "content": (
-                            f"Indexed **{', '.join(names)}** "
-                            f"({chunk_count} passages)."
-                        ),
-                    }
-                )
-            st.session_state.last_upload_key = fingerprint
-            tracked = indexed_file_names(user_id)
+    current_widget = {uf.name for uf in uploaded}
+    st.session_state.uploader_had_files = True
+    prev_widget = st.session_state.get("uploader_widget_names")
+
+    if prev_widget is not None:
+        removed = prev_widget - current_widget
+        if removed:
+            err = remove_uploaded_documents(user_id, removed)
+            if err:
+                st.error(err)
+                return False
             changed = True
+
+    st.session_state.uploader_widget_names = current_widget
+    tracked: set[str] = set(st.session_state.uploader_file_names)
+
+    fingerprint = _upload_fingerprint(uploaded)
+    if fingerprint != st.session_state.get("last_upload_key"):
+        with st.status("Processing documents…", expanded=True) as status:
+            panel = st.empty()
+            panel.markdown(_indexing_html("Preparing upload…"), unsafe_allow_html=True)
+
+            def _on_index_phase(label: str) -> None:
+                status.update(label=label.rstrip("…"))
+                panel.markdown(_indexing_html(label), unsafe_allow_html=True)
+
+            names, chunk_count, err = process_uploaded_files(
+                uploaded,
+                user_id,
+                on_phase=_on_index_phase,
+            )
+            if err:
+                status.update(label="Failed", state="error")
+                st.error(err)
+                return False
+            status.update(label=f"{len(names)} file(s) indexed", state="complete")
+            panel.empty()
+            append_message(
+                user_id,
+                {
+                    "role": "assistant",
+                    "kind": "system",
+                    "content": (
+                        f"Indexed **{', '.join(names)}** "
+                        f"({chunk_count} passages)."
+                    ),
+                }
+            )
+        st.session_state.last_upload_key = fingerprint
+        tracked = indexed_file_names(user_id)
+        changed = True
 
     st.session_state.uploader_file_names = tracked
     if not tracked:
         st.session_state.uploader_had_files = False
+        st.session_state.pop("uploader_widget_names", None)
     return changed
 
 
@@ -206,7 +254,8 @@ def _clear_workspace(user_id: str) -> None:
     st.session_state.pop("last_upload_key", None)
     st.session_state.uploader_file_names = set()
     st.session_state.uploader_had_files = False
-    reset_chats()
+    st.session_state.pop("uploader_widget_names", None)
+    reset_chats(user_id)
     _reset_sidebar_uploader()
 
 
@@ -234,6 +283,12 @@ def _render_sidebar(user_id: str) -> None:
     used, limit = get_storage_usage(user_id)
     if docs:
         st.caption(f"{len(docs)} file(s) · {format_bytes(used)} / {format_bytes(limit)}")
+        pills = "".join(
+            f'<span class="dc-doc-pill" title="{doc["name"]}">'
+            f'📄 {doc["name"]}</span>'
+            for doc in docs
+        )
+        st.markdown(f'<div class="dc-doc-list">{pills}</div>', unsafe_allow_html=True)
     else:
         st.caption(f"{format_bytes(used)} / {format_bytes(limit)}")
 
@@ -249,9 +304,10 @@ def _render_sidebar(user_id: str) -> None:
                 "",
             )
         )
-        if st.button("Clear workspace", use_container_width=True):
-            _clear_workspace(user_id)
-            st.rerun()
+
+    if st.button("Clear workspace", use_container_width=True):
+        _clear_workspace(user_id)
+        st.rerun()
 
 
 def _render_home() -> None:
@@ -285,17 +341,31 @@ def _render_home() -> None:
             st.markdown("</div>", unsafe_allow_html=True)
 
 
-def _render_messages() -> None:
-    for message in active_messages():
+def _render_messages(user_id: str) -> None:
+    for idx, message in enumerate(active_messages()):
         role = message.get("role", "assistant")
         if message.get("kind") == "system" and not message.get("content", "").startswith(
             "Indexed"
         ):
             continue
         with st.chat_message(role):
-            if message.get("format"):
+            if message.get("format") and not message.get("error"):
                 st.caption(f"**{FORMAT_LABELS.get(message['format'], message['format'])}**")
-            st.markdown(message.get("content", ""))
+            if message.get("error"):
+                err_text = message.get("content", "Something went wrong.")
+                if err_text.startswith("⚠️"):
+                    err_text = err_text[1:].strip()
+                st.error(err_text)
+                if st.button("Retry", key=f"retry_{idx}"):
+                    st.session_state.pending_generation = {
+                        "prompt": message.get("retry_prompt", ""),
+                        "format": message.get("retry_format", "auto"),
+                        "retry": True,
+                    }
+                    set_messages(user_id, active_messages()[:idx])
+                    st.rerun()
+            else:
+                st.markdown(message.get("content", ""))
 
 
 def _stream_assistant_reply(
@@ -309,10 +379,11 @@ def _stream_assistant_reply(
         reply = "Upload at least one PDF or DOCX to get started."
         with st.chat_message("assistant"):
             st.markdown(reply)
-        append_message({"role": "assistant", "content": reply, "kind": "chat"})
+        append_message(user_id, {"role": "assistant", "content": reply, "kind": "chat"})
         return
 
     fmt: ResponseFormat | None = None
+    failed = False
     with st.chat_message("assistant"):
         slot = st.empty()
         slot.markdown(_loading_html("Searching your documents"), unsafe_allow_html=True)
@@ -331,23 +402,41 @@ def _stream_assistant_reply(
             reply = "".join(parts).strip()
             if not reply:
                 reply = "No response was generated. Try again."
-            slot.markdown(reply)
-            if fmt and reply and not reply.startswith("⚠️"):
-                st.caption(f"**{FORMAT_LABELS.get(fmt, fmt)}**")
+                failed = True
+            elif reply.startswith("⚠️"):
+                failed = True
+            slot.empty()
+            if failed:
+                err_text = reply[1:].strip() if reply.startswith("⚠️") else reply
+                st.error(err_text)
+            else:
+                slot.markdown(reply)
+                if fmt:
+                    st.caption(f"**{FORMAT_LABELS.get(fmt, fmt)}**")
             touch_session(user_id)
         except (ValueError, RuntimeError) as exc:
+            failed = True
             reply = f"⚠️ {_friendly_error(exc)}"
             fmt = None
-            slot.markdown(reply)
+            slot.empty()
+            st.error(_friendly_error(exc))
         except Exception as exc:
+            failed = True
             reply = f"⚠️ Unexpected error: {_friendly_error(exc)}"
             fmt = None
-            slot.markdown(reply)
+            slot.empty()
+            st.error(f"Unexpected error: {_friendly_error(exc)}")
 
     msg: dict = {"role": "assistant", "content": reply, "kind": "chat"}
-    if fmt:
+    if fmt and not failed:
         msg["format"] = fmt
-    append_message(msg)
+    if failed:
+        msg["error"] = True
+        msg["retry_prompt"] = prompt
+        msg["retry_format"] = response_format
+    append_message(user_id, msg)
+    if failed:
+        st.rerun()
 
 
 def _queue_prompt(prompt: str, response_format: ResponseFormat | Literal["auto"]) -> None:
@@ -404,7 +493,7 @@ def main() -> None:
     inject_layout()
 
     user_id = _ensure_user_id()
-    init_chats()
+    init_chats(user_id)
 
     with st.sidebar:
         _render_sidebar(user_id)
@@ -427,11 +516,19 @@ def main() -> None:
     gen = st.session_state.pop("pending_generation", None)
 
     if gen:
-        prior = list(active_messages())
-        append_message({"role": "user", "content": gen["prompt"], "kind": "chat"})
+        if gen.get("retry"):
+            prior = list(active_messages())
+            if prior and prior[-1].get("role") == "user":
+                prior = prior[:-1]
+        else:
+            prior = list(active_messages())
+            append_message(
+                user_id,
+                {"role": "user", "content": gen["prompt"], "kind": "chat"},
+            )
 
     if has_user_messages():
-        _render_messages()
+        _render_messages(user_id)
         if gen:
             _stream_assistant_reply(user_id, gen["prompt"], gen["format"], prior)
     else:

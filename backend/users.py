@@ -92,6 +92,24 @@ def is_session_valid(user_id: str) -> bool:
     return session_idle_seconds_remaining(user_id) > 0
 
 
+def workspace_exists(user_id: str) -> bool:
+    return get_user_root(user_id).exists()
+
+
+def restore_user_id(candidate: str | None) -> str | None:
+    """Return user_id if candidate is well-formed and session is still active."""
+    if not candidate or not _USER_ID_PATTERN.match(candidate):
+        return None
+    if not is_session_valid(candidate):
+        return None
+    if workspace_exists(candidate):
+        touch_session(candidate)
+    else:
+        ensure_user_dirs(candidate)
+        create_session(candidate)
+    return candidate
+
+
 def delete_user_workspace(user_id: str) -> None:
     root = get_user_root(user_id)
     if root.exists():

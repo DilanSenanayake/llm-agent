@@ -11,12 +11,20 @@ LAYOUT_CSS = """
 
     section[data-testid="stSidebar"] {
         height: 100vh;
-        overflow-y: auto;
+        overflow: hidden;
     }
 
     section[data-testid="stSidebar"] > div {
         padding-top: 0.75rem !important;
         padding-bottom: 0.5rem !important;
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"],
+    section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+        overflow: visible !important;
     }
 
     section[data-testid="stSidebar"] .dc-sidebar-label {
@@ -201,6 +209,79 @@ LAYOUT_CSS = """
 
     [data-testid="stChatMessage"]:has(.dc-loader) {
         animation: dcFadeIn 0.2s ease;
+    }
+
+    @keyframes dcFadeIn {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Sidebar upload / indexing ── */
+    .dc-index-panel {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        margin: 0.5rem 0 0.65rem;
+        padding: 0.55rem 0.7rem;
+        border-radius: 10px;
+        border: 1px solid var(--dc-border);
+        background: linear-gradient(
+            90deg,
+            var(--dc-card) 0%,
+            #243044 50%,
+            var(--dc-card) 100%
+        );
+        background-size: 200% 100%;
+        animation: dcIndexShimmer 1.8s ease-in-out infinite;
+        font-size: 0.78rem;
+        color: var(--dc-muted);
+    }
+
+    .dc-index-panel .dc-loader-dots span {
+        width: 6px;
+        height: 6px;
+    }
+
+    .dc-index-panel strong {
+        color: var(--dc-text);
+        font-weight: 500;
+    }
+
+    @keyframes dcIndexShimmer {
+        0% { background-position: 100% 0; }
+        100% { background-position: -100% 0; }
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stFileUploader"]:has(+ .dc-indexing-active),
+    section[data-testid="stSidebar"] .dc-indexing-active [data-testid="stFileUploader"] {
+        pointer-events: none;
+        opacity: 0.55;
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stStatusWidget"] {
+        margin-top: 0.35rem !important;
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stStatusWidget"] .dc-index-panel {
+        margin: 0;
+        border: none;
+        background: transparent;
+        animation: none;
+        padding: 0.15rem 0;
+    }
+
+    section[data-testid="stSidebar"] .dc-doc-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.2rem 0.15rem;
+        margin: 0.35rem 0 0.5rem;
+    }
+
+    section[data-testid="stSidebar"] .dc-doc-list .dc-doc-pill {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     @media (max-width: 768px) {
