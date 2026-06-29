@@ -1,10 +1,10 @@
-# Agentic Knowledge Workspace
+# DocuChat
 
 Local-first MVP for **document upload → semantic indexing → RAG-powered Q&A** using **Streamlit**, **LangChain** (documents + FAISS), **sentence-transformers** (`all-MiniLM-L6-v2`), and the **Google Gen AI SDK** (Gemini).
 
 ## Overview
 
-Users upload **PDF** or **DOCX** files. The app extracts and cleans text, splits it into **500-word chunks with 50-word overlap**, embeds chunks, and stores them in a **local FAISS** index under `vector_db/`. When you click **Generate**, your instruction drives **retrieval** of the most relevant chunks and **Gemini** produces **markdown** grounded in that context.
+Users upload **PDF** or **DOCX** files in the sidebar. The app extracts and chunks text, embeds passages, and stores them in a **per-session FAISS** index. Each chat message uses your **instruction** to retrieve relevant passages and **Gemini** streams a **markdown** reply with source citations.
 
 ## Architecture
 
@@ -100,17 +100,23 @@ The first run may be slow while **all-MiniLM-L6-v2** downloads; later runs use t
 
 ## Expected user flow
 
-1. Upload one or more **PDF** / **DOCX** files.
-2. Click **Process uploaded documents** (extract, chunk, embed, merge into FAISS).
-3. Enter a **question or instruction** (required — used to find relevant passages).
-4. Choose a **response format** (Answer, Brief summary, Extract, or Compare).
-5. Click **Generate**.
-6. Read the markdown result; optionally **download as TXT**.
+1. Open **DocuChat** (`streamlit run app.py`).
+2. Upload **PDF** or **DOCX** files in the sidebar (indexed automatically).
+3. Pick a **format** in the chat bar: Answer, Brief summary, Extract, Compare — or **Auto** to detect from your message.
+4. Type a **focused question or instruction** (required) and send.
+5. Read the streamed reply with **source citations**; continue the conversation for follow-ups.
 
-**Sidebar / workspace controls:**
+**Formats:**
 
-- **Reload index from disk** — clears the in-memory FAISS cache so the next action reloads from `vector_db/`.
-- **Try again (clear database)** — deletes the FAISS index, uploaded files, and last output so you can start fresh.
+| Format | Use for |
+|--------|---------|
+| **Answer** | Direct answer to a specific question |
+| **Brief summary** | Short overview of a topic you name |
+| **Extract** | Lists, tables, or key facts only |
+| **Compare** | Side-by-side — name both items in your message |
+| **Auto** | Infers format from keywords (compare, summarize, list, etc.) |
+
+**Sidebar:** document list, storage usage, default format, and **Clear workspace** in Settings.
 
 ## Screenshots
 

@@ -1,1 +1,1 @@
-# Backend package for Agentic Knowledge Workspace.
+# Backend package for DocuChat.

@@ -1,5 +1,7 @@
 # Gemini generation via the Google Gen AI SDK (google.genai).
 
+from collections.abc import Iterator
+
 import os
 from typing import Literal
 
@@ -148,4 +150,47 @@ def generate_rag_output(
         f"Gemini API error: no available model. Tried: {', '.join(tried)}. "
         f"Last error: {last_exc}. Set GEMINI_MODEL in .env (e.g. gemini-3-flash-preview). "
         "See https://ai.google.dev/gemini-api/docs/models"
+    ) from last_exc
+
+
+def stream_rag_output(
+    response_format: ResponseFormat,
+    context: str,
+    instruction: str,
+    chat_history: str = "",
+) -> Iterator[str]:
+    system = _SYSTEM_BY_FORMAT[response_format]
+    user_content = USER_TEMPLATE.format(
+        history_section=_history_section(chat_history),
+        context=context.strip(),
+        instruction=instruction.strip(),
+    )
+
+    client = _get_client()
+    last_exc: Exception | None = None
+    tried: list[str] = []
+
+    for model_name in _model_candidates():
+        tried.append(model_name)
+        try:
+            stream = client.models.generate_content_stream(
+                model=model_name,
+                contents=user_content,
+                config=GenerateContentConfig(
+                    system_instruction=system,
+                    temperature=0.2,
+                ),
+            )
+            for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+            return
+        except Exception as exc:
+            last_exc = exc
+            if not _is_model_not_found(exc):
+                raise RuntimeError(f"Gemini API error: {exc}") from exc
+
+    raise RuntimeError(
+        f"Gemini API error: no available model. Tried: {', '.join(tried)}. "
+        f"Last error: {last_exc}."
     ) from last_exc
