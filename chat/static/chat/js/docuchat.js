@@ -3,7 +3,6 @@
 
   const cfg = window.DOCUCHAT || {};
   const app = document.body;
-  const sidebar = document.getElementById('dc-sidebar');
   const backdrop = document.getElementById('dc-backdrop');
   const menuBtn = document.getElementById('dc-menu-btn');
   const closeBtn = document.getElementById('dc-sidebar-close');
@@ -16,10 +15,24 @@
   const indexLabel = document.getElementById('dc-index-label');
   const settingsSelect = document.getElementById('settings_format');
   const formatHint = document.getElementById('dc-format-hint');
-  const settingsForm = document.querySelector('.dc-settings-form');
+  const flash = document.getElementById('dc-flash');
+
+  let hydrated = false;
+  let streaming = false;
+
+  const AVATAR_USER =
+    '<div class="dc-avatar dc-avatar-user" aria-hidden="true">' +
+    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg></div>';
+  const AVATAR_BOT =
+    '<div class="dc-avatar dc-avatar-bot" aria-hidden="true">' +
+    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.5L19 9.3l-5.2 1.8L12 16.5 10.2 11 5 9.3l5.2-1.8L12 2zM5 17l.9 2.7L8.6 21l-2.7-.9L3 21l.9-2.7L5 17zm14 0l.9 2.7 2.7.9-2.7.9-.9 2.7-.9-2.7-2.7-.9 2.7-.9.9-2.7z"/></svg></div>';
+  const AVATAR_SYSTEM =
+    '<div class="dc-avatar dc-avatar-system" aria-hidden="true">' +
+    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2l5 5h-5V4zM8 13h8v2H8v-2zm0 4h5v2H8v-2z"/></svg></div>';
 
   function csrfToken() {
-    const input = chatForm && chatForm.querySelector('[name=csrfmiddlewaretoken]');
+    const root = chatForm || uploadForm;
+    const input = root && root.querySelector('[name=csrfmiddlewaretoken]');
     return input ? input.value : '';
   }
 
@@ -37,36 +50,178 @@
   if (closeBtn) closeBtn.addEventListener('click', closeSidebar);
   if (backdrop) backdrop.addEventListener('click', closeSidebar);
 
+  function scrollContent() {
+    if (content) content.scrollTop = content.scrollHeight;
+  }
+
+  function autoResizeTextarea() {
+    if (!chatInput) return;
+    chatInput.style.height = 'auto';
+    chatInput.style.height = Math.min(chatInput.scrollHeight, 192) + 'px';
+  }
+
+  function enterChatMode() {
+    document.body.classList.add('dc-has-chat');
+    const home = document.getElementById('dc-home');
+    if (home) home.remove();
+    const suggestions = document.getElementById('dc-suggestions');
+    if (suggestions) suggestions.remove();
+  }
+
+  function avatarFor(role, kind) {
+    if (role === 'user') return AVATAR_USER;
+    if (kind === 'system') return AVATAR_SYSTEM;
+    return AVATAR_BOT;
+  }
+
+  function wrapMessage(role, kind, inner, extraClass, dataIndex) {
+    const classes = ['dc-message', 'dc-message-' + role];
+    if (kind === 'system') classes.push('dc-message-system');
+    if (extraClass) classes.push(extraClass);
+    let attrs = '';
+    if (dataIndex !== undefined && dataIndex !== null) {
+      attrs = ' data-index="' + dataIndex + '"';
+    }
+    return (
+      '<article class="' + classes.join(' ') + '"' + attrs + '>' +
+      '<div class="dc-message-row">' +
+      avatarFor(role, kind) +
+      '<div class="dc-message-body">' + inner + '</div>' +
+      '</div></article>'
+    );
+  }
+
   function updateFormatHint() {
     if (!formatHint || !settingsSelect || !cfg.formatDescriptions) return;
     formatHint.textContent = cfg.formatDescriptions[settingsSelect.value] || '';
+  }
+
+  function syncChatFormatFromSettings(label) {
+    if (!chatFormat) return;
+    for (let i = 0; i < chatFormat.options.length; i++) {
+      if (chatFormat.options[i].text === label) {
+        chatFormat.selectedIndex = i;
+        break;
+      }
+    }
+  }
+
+  async function saveSettings(label) {
+    if (!cfg.settingsUrl) return;
+    const body = new FormData();
+    body.append('csrfmiddlewaretoken', csrfToken());
+    body.append('settings_format', label);
+    try {
+      await fetch(cfg.settingsUrl, {
+        method: 'POST',
+        body: body,
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      });
+      syncChatFormatFromSettings(label);
+    } catch (e) {
+      /* non-fatal */
+    }
   }
 
   if (settingsSelect) {
     updateFormatHint();
     settingsSelect.addEventListener('change', function () {
       updateFormatHint();
-      if (settingsForm) settingsForm.submit();
+      saveSettings(settingsSelect.value);
     });
   }
 
   if (uploadForm) {
     const fileInput = uploadForm.querySelector('input[type=file]');
+
+    function setUploadBusy(busy, label) {
+      uploadForm.classList.toggle('is-busy', busy);
+      if (indexPanel) {
+        indexPanel.hidden = !busy;
+        indexPanel.setAttribute('aria-busy', busy ? 'true' : 'false');
+      }
+      if (indexLabel) {
+        indexLabel.innerHTML = '<strong>' + escapeHtml(label || 'Uploading & indexing…') + '</strong>';
+      }
+      if (fileInput) fileInput.disabled = busy;
+    }
+
+    async function uploadFiles(files) {
+      if (!files || !files.length) return;
+
+      setUploadBusy(true, 'Uploading & indexing…');
+
+      const body = new FormData();
+      body.append('csrfmiddlewaretoken', csrfToken());
+      for (let i = 0; i < files.length; i++) {
+        body.append('documents', files[i]);
+      }
+
+      try {
+        const response = await fetch(cfg.uploadUrl, {
+          method: 'POST',
+          body: body,
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        const data = await response.json().catch(function () { return {}; });
+
+        if (!response.ok || !data.ok) {
+          throw new Error(data.error || 'Upload failed');
+        }
+
+        setUploadBusy(true, 'Done — refreshing…');
+        window.location.reload();
+      } catch (err) {
+        setUploadBusy(false);
+        if (fileInput) fileInput.value = '';
+        showToast(err.message || 'Upload failed');
+      }
+    }
+
     if (fileInput) {
       fileInput.addEventListener('change', function () {
-        if (!fileInput.files || !fileInput.files.length) return;
-        if (indexPanel) {
-          indexPanel.hidden = false;
-          if (indexLabel) indexLabel.textContent = 'Uploading & indexing…';
-        }
-        uploadForm.submit();
+        const files = fileInput.files;
+        if (!files || !files.length) return;
+        uploadFiles(files);
       });
     }
   }
 
+  if (flash) {
+    setTimeout(function () {
+      flash.style.opacity = '0';
+      setTimeout(function () { flash.remove(); }, 300);
+    }, 4500);
+  }
+
+  function messageHtml(msg) {
+    const role = msg.role || 'assistant';
+    const kind = msg.kind || 'chat';
+    const extraClass = msg.error ? 'dc-message-error' : '';
+
+    let inner = '';
+    if (msg.format_label && !msg.error) {
+      inner += '<p class="dc-message-format">' + escapeHtml(msg.format_label) + '</p>';
+    }
+    if (msg.error) {
+      const errText = (msg.content || '').replace(/^⚠️\s*/, '');
+      inner +=
+        '<div class="dc-alert dc-alert-error">' + escapeHtml(errText) + '</div>' +
+        '<button type="button" class="dc-retry-btn" data-index="' + msg.index +
+        '" data-prompt="' + escapeAttr(msg.retry_prompt || '') +
+        '" data-format="' + escapeAttr(msg.retry_format || 'auto') +
+        '">Retry</button>';
+    } else {
+      inner += '<div class="dc-markdown">' + (msg.html || escapeHtml(msg.content || '')) + '</div>';
+    }
+
+    return wrapMessage(role, kind, inner, extraClass, msg.index);
+  }
+
   function ensureMessagesContainer() {
-    let home = document.getElementById('dc-home');
+    const home = document.getElementById('dc-home');
     if (home) home.remove();
+
     let container = document.getElementById('dc-messages');
     if (!container) {
       container = document.createElement('div');
@@ -74,6 +229,14 @@
       container.className = 'dc-messages';
       if (content) content.appendChild(container);
     }
+
+    if (!hydrated && cfg.initialMessages && cfg.initialMessages.length) {
+      container.innerHTML = cfg.initialMessages.map(messageHtml).join('');
+      bindRetryButtons(container);
+      hydrated = true;
+      scrollContent();
+    }
+
     return container;
   }
 
@@ -86,37 +249,63 @@
   }
 
   function appendUserMessage(text) {
+    enterChatMode();
     const container = ensureMessagesContainer();
-    const article = document.createElement('article');
-    article.className = 'dc-message dc-message-user';
-    article.innerHTML = '<div class="dc-message-body"><div class="dc-markdown"></div></div>';
-    article.querySelector('.dc-markdown').textContent = text;
-    container.appendChild(article);
-    container.scrollTop = container.scrollHeight;
-    return article;
+    const html = wrapMessage(
+      'user',
+      'chat',
+      '<div class="dc-markdown">' + escapeHtml(text) + '</div>'
+    );
+    container.insertAdjacentHTML('beforeend', html);
+    scrollContent();
   }
 
   function appendAssistantPlaceholder() {
     const container = ensureMessagesContainer();
-    const article = document.createElement('article');
-    article.className = 'dc-message dc-message-assistant dc-message-streaming';
-    article.innerHTML =
-      '<div class="dc-message-body"><div class="dc-stream-body">' +
-      loadingHtml('Searching your documents') +
-      '</div></div>';
-    container.appendChild(article);
-    container.scrollTop = container.scrollHeight;
-    return article.querySelector('.dc-stream-body');
+    const html = wrapMessage(
+      'assistant',
+      'chat',
+      '<div class="dc-stream-body">' + loadingHtml('Searching your documents') + '</div>',
+      'dc-message-streaming'
+    );
+    container.insertAdjacentHTML('beforeend', html);
+    scrollContent();
+    const articles = container.querySelectorAll('.dc-message-streaming');
+    return articles[articles.length - 1].querySelector('.dc-stream-body');
   }
 
-  function setStreamingLabel(slot, label) {
-    if (slot) slot.innerHTML = loadingHtml(label);
+  function setStreaming(active) {
+    streaming = active;
+    const sendBtn = chatForm && chatForm.querySelector('.dc-send-btn');
+    if (sendBtn) sendBtn.disabled = active;
+    if (chatInput) chatInput.disabled = active;
+    if (chatFormat) chatFormat.disabled = active;
+    document.querySelectorAll('.dc-chip-btn').forEach(function (btn) {
+      btn.disabled = active;
+    });
+  }
+
+  function showToast(text) {
+    let el = document.getElementById('dc-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'dc-toast';
+      el.className = 'dc-toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add('dc-toast-visible');
+    clearTimeout(showToast._timer);
+    showToast._timer = setTimeout(function () {
+      el.classList.remove('dc-toast-visible');
+    }, 2800);
   }
 
   async function streamChat(prompt, format, options) {
     options = options || {};
-    const sendBtn = chatForm && chatForm.querySelector('.dc-send-btn');
-    if (sendBtn) sendBtn.disabled = true;
+    if (streaming) return;
+
+    setStreaming(true);
 
     if (!options.retry) {
       appendUserMessage(prompt);
@@ -124,6 +313,7 @@
 
     const slot = appendAssistantPlaceholder();
     let accumulated = '';
+    let sawText = false;
 
     const body = new FormData();
     body.append('csrfmiddlewaretoken', csrfToken());
@@ -167,19 +357,20 @@
             continue;
           }
 
-          if (payload.error) {
+          if (payload.error && !payload.done) {
             accumulated = payload.error;
             slot.innerHTML =
               '<div class="dc-alert dc-alert-error">' + escapeHtml(payload.error) + '</div>';
           }
 
           if (payload.text) {
-            if (!accumulated) setStreamingLabel(slot, 'Thinking…');
+            if (!sawText) {
+              sawText = true;
+              slot.innerHTML = '<div class="dc-markdown dc-stream-text"></div>';
+            }
             accumulated += payload.text;
-            slot.innerHTML =
-              '<div class="dc-markdown" style="white-space:pre-wrap">' +
-              escapeHtml(accumulated) +
-              '</div>';
+            const streamEl = slot.querySelector('.dc-stream-text');
+            if (streamEl) streamEl.textContent = accumulated;
           }
 
           if (payload.done) {
@@ -189,7 +380,7 @@
             if (payload.failed) {
               parent.classList.add('dc-message-error');
               const errText = payload.error || accumulated.replace(/^⚠️\s*/, '');
-              let html =
+              slot.innerHTML =
                 '<div class="dc-alert dc-alert-error">' + escapeHtml(errText) + '</div>' +
                 '<button type="button" class="dc-retry-btn" data-index="' +
                 payload.retry_idx +
@@ -198,7 +389,6 @@
                 '" data-format="' +
                 escapeAttr(payload.retry_format || format) +
                 '">Retry</button>';
-              slot.innerHTML = html;
               bindRetryButtons(parent);
             } else {
               let html = '';
@@ -209,17 +399,21 @@
               slot.innerHTML = html;
             }
           }
-        }
 
-        const container = document.getElementById('dc-messages');
-        if (container) container.scrollTop = container.scrollHeight;
+          scrollContent();
+        }
       }
     } catch (err) {
       slot.innerHTML =
         '<div class="dc-alert dc-alert-error">' + escapeHtml(err.message || String(err)) + '</div>';
     } finally {
-      if (sendBtn) sendBtn.disabled = false;
-      if (chatInput) chatInput.value = '';
+      setStreaming(false);
+      if (chatInput) {
+        chatInput.value = '';
+        autoResizeTextarea();
+        chatInput.focus();
+      }
+      scrollContent();
     }
   }
 
@@ -254,12 +448,27 @@
 
   bindRetryButtons(document);
 
+  if (document.getElementById('dc-messages')) {
+    hydrated = true;
+    scrollContent();
+  }
+
   if (chatForm) {
+    if (chatInput) {
+      chatInput.addEventListener('input', autoResizeTextarea);
+      chatInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          chatForm.requestSubmit();
+        }
+      });
+    }
+
     chatForm.addEventListener('submit', function (e) {
       e.preventDefault();
       const prompt = (chatInput && chatInput.value || '').trim();
       if (!prompt) {
-        alert('Enter a question or instruction.');
+        showToast('Enter a question or instruction.');
         return;
       }
       const format = chatFormat ? chatFormat.value : 'auto';
@@ -269,11 +478,19 @@
 
   document.querySelectorAll('.dc-chip-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
+      enterChatMode();
+      if (chatFormat && btn.dataset.format) {
+        for (let i = 0; i < chatFormat.options.length; i++) {
+          if (chatFormat.options[i].value === btn.dataset.format) {
+            chatFormat.selectedIndex = i;
+            break;
+          }
+        }
+      }
       streamChat(btn.dataset.prompt, btn.dataset.format);
     });
   });
 
-  // Persist session id in URL (like Streamlit ?sid=)
   if (cfg.sessionParam) {
     const url = new URL(window.location.href);
     if (url.searchParams.get('sid') !== cfg.sessionParam) {
