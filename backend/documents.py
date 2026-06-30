@@ -84,6 +84,17 @@ def indexed_file_names(user_id: str) -> set[str]:
     return {doc["name"] for doc in list_uploaded_documents(user_id)}
 
 
+def _file_bytes(uploaded_file) -> bytes:
+    if hasattr(uploaded_file, "getvalue"):
+        return uploaded_file.getvalue()
+    if hasattr(uploaded_file, "read"):
+        data = uploaded_file.read()
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+        return data
+    raise TypeError(f"Unsupported uploaded file type: {type(uploaded_file)!r}")
+
+
 def process_uploaded_files(
     uploaded_files,
     user_id: str,
@@ -97,7 +108,7 @@ def process_uploaded_files(
         if on_phase is not None:
             on_phase(label)
 
-    incoming = [(uf.name, len(uf.getvalue())) for uf in uploaded_files]
+    incoming = [(uf.name, len(_file_bytes(uf))) for uf in uploaded_files]
     ok, err = check_upload_capacity(user_id, incoming)
     if not ok:
         return [], 0, err
@@ -114,7 +125,7 @@ def process_uploaded_files(
             return [], 0, f"Unsupported type for {uf.name!r}. Only PDF and DOCX are allowed."
 
         dest = uploads_dir / uf.name
-        dest.write_bytes(uf.getvalue())
+        dest.write_bytes(_file_bytes(uf))
         saved_names.append(uf.name)
 
     _phase("Indexing documents…")

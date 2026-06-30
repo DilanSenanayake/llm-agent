@@ -1,0 +1,109 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DocuChat</title>
+  <link rel="stylesheet" href="{% static 'chat/css/docuchat.css' %}">
+</head>
+<body class="dc-app{% if sidebar_open %} dc-sidebar-open{% endif %}">
+  <div class="dc-backdrop" id="dc-backdrop" hidden></div>
+
+  <aside class="dc-sidebar" id="dc-sidebar" aria-label="Documents">
+  <div class="dc-sidebar-inner">
+    <button type="button" class="dc-mobile-close dc-mobile-only" id="dc-sidebar-close" aria-label="Close documents">✕ Close</button>
+
+    <p class="dc-logo">Docu<span>Chat</span></p>
+    <p class="dc-sidebar-label">Documents</p>
+
+    <form class="dc-upload-form" action="{% url 'chat:upload' %}" method="post" enctype="multipart/form-data" id="dc-upload-form">
+      {% csrf_token %}
+      <label class="dc-upload-label">
+        <input type="file" name="documents" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple>
+        <span class="dc-upload-btn">Upload PDF or DOCX</span>
+      </label>
+    </form>
+
+    <div class="dc-index-panel" id="dc-index-panel" hidden>
+      <span class="dc-loader-dots"><span></span><span></span><span></span></span>
+      <span><strong id="dc-index-label">Processing…</strong></span>
+    </div>
+
+    {% if doc_count %}
+    <p class="dc-storage-caption">{{ doc_count }} file(s) · {{ storage_used }} / {{ storage_limit }}</p>
+    <div class="dc-doc-list">
+      {% for doc in documents %}
+      <form class="dc-doc-pill-form" action="{% url 'chat:remove_document' %}" method="post">
+        {% csrf_token %}
+        <input type="hidden" name="name" value="{{ doc.name }}">
+        <button type="submit" class="dc-doc-pill" title="Remove {{ doc.name }}">📄 {{ doc.name }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="dc-storage-caption">{{ storage_used }} / {{ storage_limit }}</p>
+    {% endif %}
+
+    <details class="dc-settings">
+      <summary>Settings</summary>
+      <form action="{% url 'chat:settings' %}" method="post" class="dc-settings-form">
+        {% csrf_token %}
+        <label for="settings_format">Default format</label>
+        <select name="settings_format" id="settings_format">
+          {% for label, value in format_options.items %}
+          <option value="{{ label }}"{% if label == settings_format %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <p class="dc-settings-hint" id="dc-format-hint"></p>
+      </form>
+    </details>
+
+    <form action="{% url 'chat:clear_workspace' %}" method="post" class="dc-clear-form" onsubmit="return confirm('Clear all documents and chat history?');">
+      {% csrf_token %}
+      <button type="submit" class="dc-btn dc-btn-secondary">Clear workspace</button>
+    </form>
+  </div>
+  </aside>
+
+  <div class="dc-main-outer">
+  <main class="dc-main">
+    <button type="button" class="dc-mobile-menu dc-mobile-only" id="dc-menu-btn" aria-label="Open documents">☰</button>
+
+    {% if messages %}
+    <div class="dc-flash" aria-live="polite">
+      {% for message in messages %}
+      <div class="dc-flash-item dc-flash-{{ message.tags }}">{{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+
+    <form class="dc-chat-form" id="dc-chat-form" autocomplete="off">
+      {% csrf_token %}
+      <div class="dc-chat-form-row">
+        <select name="format" id="dc-chat-format" aria-label="Response format">
+          {% for label, value in format_options.items %}
+          <option value="{{ value }}" data-label="{{ label }}"{% if label == settings_format %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <input type="text" name="prompt" id="dc-chat-input" placeholder="Ask a focused question…" aria-label="Message">
+        <button type="submit" class="dc-send-btn" aria-label="Send">↑</button>
+      </div>
+    </form>
+  </main>
+  </div>
+
+  <script>
+    window.DOCUCHAT = {
+      streamUrl: "{% url 'chat:chat_stream' %}",
+      sessionParam: "{{ sid }}",
+      formatDescriptions: {{ format_descriptions_json|safe }},
+      defaultFormat: "{{ settings_format }}",
+    };
+  </script>
+  <script src="{% static 'chat/js/docuchat.js' %}"></script>
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

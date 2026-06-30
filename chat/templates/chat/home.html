@@ -1,0 +1,44 @@
+{% extends "chat/base.html" %}
+{% load chat_extras %}
+
+{% block content %}
+<div class="dc-content" id="dc-content">
+  {% if has_chat %}
+  <div class="dc-messages" id="dc-messages">
+    {% for msg in messages %}
+    <article class="dc-message dc-message-{{ msg.role }}{% if msg.error %} dc-message-error{% endif %}" data-index="{{ msg.index }}">
+      <div class="dc-message-body">
+        {% if msg.format_label and not msg.error %}
+        <p class="dc-message-format">{{ msg.format_label }}</p>
+        {% endif %}
+        {% if msg.error %}
+        <div class="dc-alert dc-alert-error">{{ msg.content|cut:"⚠️ "|default:msg.content }}</div>
+        <button type="button" class="dc-retry-btn" data-index="{{ msg.index }}" data-prompt="{{ msg.retry_prompt }}" data-format="{{ msg.retry_format }}">Retry</button>
+        {% else %}
+        <div class="dc-markdown">{{ msg.html|safe }}</div>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="dc-home" id="dc-home">
+    <div class="dc-home-logo">Docu<span>Chat</span></div>
+    <div class="dc-home-card">
+      <div class="dc-home-icon">💬</div>
+      <div class="dc-home-title">Ask about your documents</div>
+      <div class="dc-home-sub">Upload in the sidebar, choose a format, ask a focused question.</div>
+      <p class="dc-prompts-label">Examples</p>
+      <div class="dc-prompt-grid">
+        {% for item in suggested_prompts %}
+        <button type="button" class="dc-chip-btn" data-prompt="{{ item.prompt }}" data-format="{{ item.format }}">
+          <span class="dc-chip-format">{{ item.format|format_label }}</span>
+          {{ item.prompt }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -35,3 +35,6 @@ Thumbs.db
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Django
+db.sqlite3

@@ -1,4 +1,4 @@
-# Chat history — session state with per-user disk persistence.
+# Chat history — per-user disk persistence (framework-agnostic).
 
 from __future__ import annotations
 
@@ -29,42 +29,26 @@ def save_chats(user_id: str, messages: list[dict]) -> None:
     path.write_text(json.dumps(messages), encoding="utf-8")
 
 
-def init_chats(user_id: str) -> None:
-    import streamlit as st
-
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = load_chats(user_id)
+def get_messages(user_id: str) -> list[dict]:
+    return load_chats(user_id)
 
 
 def reset_chats(user_id: str) -> None:
-    import streamlit as st
-
-    st.session_state.chat_messages = []
     save_chats(user_id, [])
 
 
 def set_messages(user_id: str, messages: list[dict]) -> None:
-    import streamlit as st
-
-    st.session_state.chat_messages = messages
     save_chats(user_id, messages)
 
 
-def active_messages() -> list[dict]:
-    import streamlit as st
-
-    return st.session_state.get("chat_messages", [])
-
-
 def append_message(user_id: str, message: dict) -> None:
-    import streamlit as st
+    messages = load_chats(user_id)
+    messages.append(message)
+    save_chats(user_id, messages)
 
-    st.session_state.chat_messages.append(message)
-    save_chats(user_id, st.session_state.chat_messages)
 
-
-def has_user_messages() -> bool:
+def has_user_messages(user_id: str) -> bool:
     return any(
         m.get("kind") == "chat" and m.get("role") == "user"
-        for m in active_messages()
+        for m in get_messages(user_id)
     )
