@@ -44,6 +44,12 @@ def _message_display(messages: list[dict]) -> list[dict]:
         item = dict(message)
         item["index"] = idx
         item["format_label"] = FORMAT_LABELS.get(message.get("format", ""), "")
+        item["role"] = message.get("role", "assistant")
+        item["kind"] = message.get("kind", "chat")
+        if message.get("error"):
+            item["error"] = True
+            item["retry_prompt"] = message.get("retry_prompt", "")
+            item["retry_format"] = message.get("retry_format", "auto")
         if not message.get("error"):
             item["html"] = _render_markdown(message.get("content", ""))
         out.append(item)
@@ -54,36 +60,53 @@ def _base_context(request, *, default_format: str = "Auto") -> dict:
     settings_format = request.session.get("settings_format", default_format)
     if settings_format not in FORMAT_OPTIONS:
         settings_format = "Auto"
+    display_messages = _message_display(get_messages(request.user_id))
+    msgs = get_messages(request.user_id)
+    has_chat = any(
+        m.get("kind") == "chat" and m.get("role") == "user" for m in msgs
+    )
     return {
         "format_options": FORMAT_OPTIONS,
         "format_labels": FORMAT_LABELS,
         "format_descriptions": FORMAT_DESCRIPTIONS,
         "format_descriptions_json": json.dumps(FORMAT_DESCRIPTIONS),
+        "format_labels_json": json.dumps(FORMAT_LABELS),
         "settings_format": settings_format,
         "session_id": request.user_id,
         SESSION_QP: request.user_id,
+        "display_messages_json": json.dumps(display_messages),
+        "has_chat": has_chat,
         **sidebar_context(request.user_id),
     }
 
 
 def home(request):
     ctx = _base_context(request)
-    msgs = get_messages(request.user_id)
-    ctx["messages"] = _message_display(msgs)
-    ctx["has_chat"] = any(m.get("role") == "user" and m.get("kind") == "chat" for m in msgs)
+    ctx["messages"] = _message_display(get_messages(request.user_id))
     ctx["suggested_prompts"] = SUGGESTED_PROMPTS
+    ctx["django_messages"] = list(messages.get_messages(request))
     return render(request, "chat/home.html", ctx)
+
+
+def _redirect_home(request):
+    sid = request.user_id
+    return redirect(f"/?{SESSION_QP}={sid}")
 
 
 @require_POST
 def upload_documents(request):
     files = request.FILES.getlist("documents")
     ok, msg = handle_upload(request.user_id, files)
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     if ok:
         messages.success(request, msg)
+        if is_ajax:
+            return JsonResponse({"ok": True, "message": msg})
     else:
         messages.error(request, msg)
-    return redirect("chat:home")
+        if is_ajax:
+            return JsonResponse({"ok": False, "error": msg}, status=400)
+    return _redirect_home(request)
 
 
 @require_POST
@@ -95,14 +118,14 @@ def remove_document(request):
             messages.error(request, err)
         else:
             messages.success(request, f"Removed {name}.")
-    return redirect("chat:home")
+    return _redirect_home(request)
 
 
 @require_POST
 def clear_workspace_view(request):
     clear_workspace(request.user_id)
     messages.success(request, "Workspace cleared.")
-    return redirect("chat:home")
+    return _redirect_home(request)
 
 
 @require_POST
@@ -110,8 +133,9 @@ def update_settings(request):
     fmt = request.POST.get("settings_format", "Auto")
     if fmt in FORMAT_OPTIONS:
         request.session["settings_format"] = fmt
-        messages.success(request, f"Default format set to {fmt}.")
-    return redirect("chat:home")
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JsonResponse({"ok": True, "format": fmt})
+    return _redirect_home(request)
 
 
 @require_POST

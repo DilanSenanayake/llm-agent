@@ -2,11 +2,20 @@
 {% load chat_extras %}
 
 {% block content %}
-<div class="dc-content" id="dc-content">
-  {% if has_chat %}
-  <div class="dc-messages" id="dc-messages">
-    {% for msg in messages %}
-    <article class="dc-message dc-message-{{ msg.role }}{% if msg.error %} dc-message-error{% endif %}" data-index="{{ msg.index }}">
+{% if has_chat %}
+<div class="dc-messages" id="dc-messages">
+  {% for msg in messages %}
+  <article class="dc-message dc-message-{{ msg.role }}{% if msg.kind == 'system' %} dc-message-system{% endif %}{% if msg.error %} dc-message-error{% endif %}" data-index="{{ msg.index }}">
+    <div class="dc-message-row">
+      <div class="dc-avatar {% if msg.role == 'user' %}dc-avatar-user{% elif msg.kind == 'system' %}dc-avatar-system{% else %}dc-avatar-bot{% endif %}" aria-hidden="true">
+        {% if msg.role == 'user' %}
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+        {% elif msg.kind == 'system' %}
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2l5 5h-5V4zM8 13h8v2H8v-2zm0 4h5v2H8v-2z"/></svg>
+        {% else %}
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.5L19 9.3l-5.2 1.8L12 16.5 10.2 11 5 9.3l5.2-1.8L12 2zM5 17l.9 2.7L8.6 21l-2.7-.9L3 21l.9-2.7L5 17zm14 0l.9 2.7 2.7.9-2.7.9-.9 2.7-.9-2.7-2.7-.9 2.7-.9.9-2.7z"/></svg>
+        {% endif %}
+      </div>
       <div class="dc-message-body">
         {% if msg.format_label and not msg.error %}
         <p class="dc-message-format">{{ msg.format_label }}</p>
@@ -18,27 +27,34 @@
         <div class="dc-markdown">{{ msg.html|safe }}</div>
         {% endif %}
       </div>
-    </article>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="dc-home" id="dc-home">
+  <div class="dc-home-inner">
+    <div class="dc-home-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.5L19 9.3l-5.2 1.8L12 16.5 10.2 11 5 9.3l5.2-1.8L12 2z"/></svg>
+    </div>
+    <h1 class="dc-home-greeting">What can I help you with?</h1>
+    <p class="dc-home-sub">Upload PDF or DOCX files in the sidebar, then ask questions about them.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block suggestions %}
+{% if not has_chat %}
+<div class="dc-suggestions" id="dc-suggestions">
+  <div class="dc-suggestion-grid">
+    {% for item in suggested_prompts %}
+    <button type="button" class="dc-chip-btn" data-prompt="{{ item.prompt }}" data-format="{{ item.format }}">
+      <span class="dc-chip-format">{{ item.format|format_label }}</span>
+      {{ item.prompt }}
+    </button>
     {% endfor %}
   </div>
-  {% else %}
-  <div class="dc-home" id="dc-home">
-    <div class="dc-home-logo">Docu<span>Chat</span></div>
-    <div class="dc-home-card">
-      <div class="dc-home-icon">💬</div>
-      <div class="dc-home-title">Ask about your documents</div>
-      <div class="dc-home-sub">Upload in the sidebar, choose a format, ask a focused question.</div>
-      <p class="dc-prompts-label">Examples</p>
-      <div class="dc-prompt-grid">
-        {% for item in suggested_prompts %}
-        <button type="button" class="dc-chip-btn" data-prompt="{{ item.prompt }}" data-format="{{ item.format }}">
-          <span class="dc-chip-format">{{ item.format|format_label }}</span>
-          {{ item.prompt }}
-        </button>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-  {% endif %}
 </div>
+{% endif %}
 {% endblock %}
